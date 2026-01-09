@@ -3,6 +3,7 @@ import { db } from '@context-engine/db';
 import { knowledgeNodes, knowledgeEdges, contextDeltas, graphVersions } from '@context-engine/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { graphBuilderService } from '../services/knowledge-graph/graph-builder.service.js';
+import { domainExtractorService } from '../services/knowledge-graph/domain-extractor.service.js';
 import { AppError } from '../middleware/error-handler.js';
 
 export const graphRouter: RouterType = Router();
@@ -296,6 +297,110 @@ graphRouter.post('/:sessionId/cypher', async (req, res, next) => {
     res.json({
       success: true,
       data: { result },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =============================================================================
+// Domain Extraction Endpoints
+// =============================================================================
+
+/**
+ * POST /api/graph/domain/extract
+ * Extract a complete domain knowledge graph from documentation
+ */
+graphRouter.post('/domain/extract', async (req, res, next) => {
+  try {
+    const { documentation, domainName } = req.body;
+
+    if (!documentation || typeof documentation !== 'string') {
+      throw new AppError('INVALID_INPUT', 'Documentation text is required', 400);
+    }
+
+    const graph = await domainExtractorService.extractDomainGraph(documentation, domainName);
+
+    res.json({
+      success: true,
+      data: {
+        graph,
+        stats: {
+          nodeCount: graph.nodes.length,
+          edgeCount: graph.edges.length,
+          nodeTypes: [...new Set(graph.nodes.map(n => n.type))],
+          edgeTypes: [...new Set(graph.edges.map(e => e.type))],
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/graph/domain/entities
+ * Extract only entities from documentation
+ */
+graphRouter.post('/domain/entities', async (req, res, next) => {
+  try {
+    const { documentation } = req.body;
+
+    if (!documentation || typeof documentation !== 'string') {
+      throw new AppError('INVALID_INPUT', 'Documentation text is required', 400);
+    }
+
+    const entities = await domainExtractorService.extractEntities(documentation);
+
+    res.json({
+      success: true,
+      data: { entities },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/graph/domain/processes
+ * Extract processes/workflows from documentation
+ */
+graphRouter.post('/domain/processes', async (req, res, next) => {
+  try {
+    const { documentation } = req.body;
+
+    if (!documentation || typeof documentation !== 'string') {
+      throw new AppError('INVALID_INPUT', 'Documentation text is required', 400);
+    }
+
+    const result = await domainExtractorService.extractProcesses(documentation);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/graph/domain/rules
+ * Extract business rules from documentation
+ */
+graphRouter.post('/domain/rules', async (req, res, next) => {
+  try {
+    const { documentation } = req.body;
+
+    if (!documentation || typeof documentation !== 'string') {
+      throw new AppError('INVALID_INPUT', 'Documentation text is required', 400);
+    }
+
+    const rules = await domainExtractorService.extractRules(documentation);
+
+    res.json({
+      success: true,
+      data: { rules },
     });
   } catch (error) {
     next(error);

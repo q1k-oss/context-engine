@@ -10,6 +10,9 @@ import type {
   GraphBuildResult,
   NodeType,
   EdgeType,
+  DomainGraph,
+  DomainNode,
+  DomainEdge,
 } from '@context-engine/shared';
 import { entityExtractorService } from './entity-extractor.service.js';
 import { relationshipInferrerService } from './relationship-inferrer.service.js';
@@ -507,5 +510,249 @@ export const graphBuilderService = {
       throw new Error('AGE is not enabled');
     }
     return ageClientService.executeCypher<T>(cypher);
+  },
+
+  /**
+   * Process domain documentation and create a comprehensive knowledge graph
+   * Use this for detailed specifications, requirements documents, etc.
+   */
+  async processDomainDocumentation(
+    sessionId: string,
+    documentation: string,
+    domainName?: string,
+    messageId?: string
+  ): Promise<GraphBuildResult> {
+    // Extract domain graph using specialized extraction
+    const domainGraph = await entityExtractorService.extractDomainKnowledge(documentation, domainName);
+
+    // Get current version
+    const latestVersion = await db.query.graphVersions.findFirst({
+      where: eq(graphVersions.sessionId, sessionId),
+      orderBy: [desc(graphVersions.version)],
+    });
+    const currentVersion = latestVersion?.version || 0;
+    const newVersion = currentVersion + 1;
+
+    const nodesAdded: KnowledgeNode[] = [];
+    const edgesAdded: KnowledgeEdge[] = [];
+
+    // Create a map from domain node IDs to database node IDs
+    const domainIdToDbId = new Map<string, string>();
+
+    // Calculate priority based on domain node type
+    const getPriorityForType = (type: string): string => {
+      switch (type) {
+        case 'Entity':
+          return '0.80';
+        case 'Process':
+          return '0.75';
+        case 'Rule':
+          return '0.70';
+        case 'ProcessStep':
+          return '0.65';
+        case 'Decision':
+          return '0.70';
+        case 'Trigger':
+          return '0.60';
+        case 'Attribute':
+          return '0.55';
+        case 'Enum':
+          return '0.50';
+        case 'EnumValue':
+          return '0.40';
+        case 'Input':
+        case 'Output':
+          return '0.55';
+        case 'Actor':
+        case 'System':
+          return '0.65';
+        case 'Condition':
+          return '0.55';
+        default:
+          return '0.50';
+      }
+    };
+
+    // Process domain nodes
+    for (const domainNode of domainGraph.nodes) {
+      const dbId = uuidv4();
+      domainIdToDbId.set(domainNode.id, dbId);
+
+      const newNode = {
+        id: dbId,
+        sessionId,
+        nodeType: domainNode.type as NodeType,
+        name: domainNode.name,
+        graphData: domainNode.properties || {},
+        confidenceScore: '0.85', // Domain extraction is high confidence
+        priorityScore: getPriorityForType(domainNode.type),
+        sourceMessageId: messageId || null,
+        version: 1,
+        isDeleted: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await db.insert(knowledgeNodes).values(newNode);
+      nodesAdded.push(newNode as unknown as KnowledgeNode);
+
+      // Sync to AGE if enabled
+      if (AGE_ENABLED) {
+        try {
+          await ageClientService.createNode(sessionId, domainNode.type, {
+            id: dbId,
+            domainId: domainNode.id,
+            name: domainNode.name,
+            ...domainNode.properties,
+          });
+        } catch (error) {
+          console.error('Failed to sync domain node to AGE:', error);
+        }
+      }
+    }
+
+    // Process domain edges
+    for (const domainEdge of domainGraph.edges) {
+      const sourceDbId = domainIdToDbId.get(domainEdge.from);
+      const targetDbId = domainIdToDbId.get(domainEdge.to);
+
+      // Skip if either node doesn't exist
+      if (!sourceDbId || !targetDbId) continue;
+
+      const edgeId = uuidv4();
+      const newEdge = {
+        id: edgeId,
+        sessionId,
+        sourceNodeId: sourceDbId,
+        targetNodeId: targetDbId,
+        edgeType: domainEdge.type as EdgeType,
+        edgeData: domainEdge.properties || {},
+        weight: '1.0',
+        isDeleted: false,
+        createdAt: new Date(),
+      };
+
+      await db.insert(knowledgeEdges).values(newEdge);
+      edgesAdded.push(newEdge as unknown as KnowledgeEdge);
+
+      // Sync to AGE if enabled
+      if (AGE_ENABLED) {
+        try {
+          await ageClientService.createRelationship(
+            sourceDbId,
+            targetDbId,
+            domainEdge.type,
+            domainEdge.properties || {}
+          );
+        } catch (error) {
+          console.error('Failed to sync domain edge to AGE:', error);
+        }
+      }
+    }
+
+    // Create context delta
+    const deltaData = {
+      additions: {
+        nodes: nodesAdded,
+        edges: edgesAdded,
+      },
+      modifications: {
+        nodes: [],
+        edges: [],
+        priorities: [],
+      },
+      removals: {
+        nodeIds: [],
+        edgeIds: [],
+      },
+    };
+
+    const delta: ContextDelta = {
+      id: uuidv4(),
+      sessionId,
+      versionFrom: currentVersion,
+      versionTo: newVersion,
+      triggerMessageId: messageId || null,
+      additions: deltaData.additions,
+      modifications: deltaData.modifications,
+      removals: deltaData.removals,
+      summary: `Domain extraction: Added ${nodesAdded.length} nodes, ${edgesAdded.length} edges from ${domainName || 'documentation'}`,
+      statistics: {
+        additions: nodesAdded.length + edgesAdded.length,
+        modifications: 0,
+        removals: 0,
+      },
+      createdAt: new Date(),
+    };
+
+    await db.insert(contextDeltas).values({
+      id: delta.id,
+      sessionId,
+      versionFrom: currentVersion,
+      versionTo: newVersion,
+      triggerMessageId: messageId || null,
+      deltaData,
+      createdAt: new Date(),
+    });
+
+    // Create graph version snapshot
+    const updatedNodes = await db.query.knowledgeNodes.findMany({
+      where: and(
+        eq(knowledgeNodes.sessionId, sessionId),
+        eq(knowledgeNodes.isDeleted, false)
+      ),
+    });
+    const updatedEdges = await db.query.knowledgeEdges.findMany({
+      where: and(
+        eq(knowledgeEdges.sessionId, sessionId),
+        eq(knowledgeEdges.isDeleted, false)
+      ),
+    });
+
+    await db.insert(graphVersions).values({
+      id: uuidv4(),
+      sessionId,
+      version: newVersion,
+      graphSnapshot: {
+        sessionId,
+        version: newVersion,
+        nodes: updatedNodes,
+        edges: updatedEdges,
+        domainMetadata: domainGraph.metadata,
+        createdAt: new Date(),
+      },
+      createdAt: new Date(),
+    });
+
+    console.log(`Domain extraction complete: ${nodesAdded.length} nodes, ${edgesAdded.length} edges`);
+
+    return {
+      nodesAdded,
+      nodesModified: [],
+      nodesRemoved: [],
+      edgesAdded,
+      edgesModified: [],
+      edgesRemoved: [],
+      delta,
+    };
+  },
+
+  /**
+   * Smart message processing - uses domain extraction for documentation-like content
+   */
+  async processMessageSmart(sessionId: string, message: Message): Promise<GraphBuildResult> {
+    // Check if content looks like documentation
+    if (entityExtractorService.shouldUseDomainExtraction(message.content)) {
+      console.log('Detected documentation-like content, using domain extraction');
+      return this.processDomainDocumentation(
+        sessionId,
+        message.content,
+        undefined,
+        message.id
+      );
+    }
+
+    // Use regular message processing for conversational content
+    return this.processMessage(sessionId, message);
   },
 };

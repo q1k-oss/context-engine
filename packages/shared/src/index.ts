@@ -9,3 +9,9 @@ export * from './types/api.types.js';
 
 // File Types
 export * from './types/file.types.js';
+
+// Workflow Schema Types
+export * from './types/workflow-schema.types.js';
+
+// Domain Schema Types (for rich domain modeling)
+export * from './types/domain-schema.types.js';

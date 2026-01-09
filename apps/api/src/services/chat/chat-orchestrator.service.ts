@@ -191,16 +191,21 @@ export const chatOrchestratorService = {
     };
 
     // Process both messages for knowledge graph (async, non-blocking)
+    // Uses smart processing to automatically detect documentation and use domain extraction
     try {
-      await graphBuilderService.processMessage(sessionId, userMessage as Message);
-      const graphResult = await graphBuilderService.processMessage(sessionId, assistantMessage as Message);
+      const userGraphResult = await graphBuilderService.processMessageSmart(sessionId, userMessage as Message);
+      const assistantGraphResult = await graphBuilderService.processMessageSmart(sessionId, assistantMessage as Message);
+
+      const totalNodesAdded = userGraphResult.nodesAdded.length + assistantGraphResult.nodesAdded.length;
+      const totalNodesModified = userGraphResult.nodesModified.length + assistantGraphResult.nodesModified.length;
+      const latestVersion = Math.max(userGraphResult.delta.versionTo, assistantGraphResult.delta.versionTo);
 
       yield {
         type: 'graph_update',
         data: {
-          nodesAdded: graphResult.nodesAdded.length,
-          nodesModified: graphResult.nodesModified.length,
-          newVersion: graphResult.delta.versionTo,
+          nodesAdded: totalNodesAdded,
+          nodesModified: totalNodesModified,
+          newVersion: latestVersion,
         },
       };
     } catch (error) {
