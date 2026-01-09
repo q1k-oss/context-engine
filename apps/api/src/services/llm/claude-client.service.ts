@@ -1,9 +1,16 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ClaudeContext, ClaudeMessage } from '@context-engine/shared';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+let anthropic: Anthropic | null = null;
+
+function getClient(): Anthropic {
+  if (!anthropic) {
+    anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    });
+  }
+  return anthropic;
+}
 
 /**
  * Build the system prompt including knowledge graph context
@@ -55,7 +62,7 @@ export const claudeClientService = {
       content: msg.content,
     }));
 
-    const stream = await anthropic.messages.stream({
+    const stream = await getClient().messages.stream({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 8192,
       system: systemPrompt,
@@ -85,7 +92,7 @@ export const claudeClientService = {
       content: msg.content,
     }));
 
-    const response = await anthropic.messages.create({
+    const response = await getClient().messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 8192,
       system: systemPrompt,
@@ -131,7 +138,7 @@ Return ONLY valid JSON in this exact format:
 
 Be conservative - only extract entities/concepts with confidence > 0.5. Focus on concrete, actionable information.`;
 
-    const response = await anthropic.messages.create({
+    const response = await getClient().messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
       messages: [{ role: 'user', content: prompt }],

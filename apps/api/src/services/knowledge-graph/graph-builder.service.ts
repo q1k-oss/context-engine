@@ -14,6 +14,10 @@ import type {
 import { entityExtractorService } from './entity-extractor.service.js';
 import { relationshipInferrerService } from './relationship-inferrer.service.js';
 import { priorityCalculatorService } from './priority-calculator.service.js';
+import { ageClientService } from '../graph/age-client.service.js';
+
+// Flag to enable/disable AGE sync (can be controlled via env var)
+const AGE_ENABLED = process.env.AGE_ENABLED !== 'false';
 
 /**
  * Graph Builder Service
@@ -413,5 +417,95 @@ export const graphBuilderService = {
         };
       }),
     };
+  },
+
+  /**
+   * Sync a node to Apache AGE graph
+   */
+  async syncNodeToAGE(node: KnowledgeNode): Promise<void> {
+    if (!AGE_ENABLED) return;
+
+    try {
+      await ageClientService.createNode(node.sessionId, node.nodeType, {
+        id: node.id,
+        name: node.name,
+        confidenceScore: Number(node.confidenceScore),
+        priorityScore: Number(node.priorityScore),
+        ...(node.graphData as Record<string, unknown>),
+      });
+    } catch (error) {
+      console.error('Failed to sync node to AGE:', error);
+    }
+  },
+
+  /**
+   * Sync an edge to Apache AGE graph
+   */
+  async syncEdgeToAGE(edge: KnowledgeEdge): Promise<void> {
+    if (!AGE_ENABLED) return;
+
+    try {
+      await ageClientService.createRelationship(
+        edge.sourceNodeId,
+        edge.targetNodeId,
+        edge.edgeType,
+        {
+          weight: Number(edge.weight),
+          ...(edge.edgeData as Record<string, unknown>),
+        }
+      );
+    } catch (error) {
+      console.error('Failed to sync edge to AGE:', error);
+    }
+  },
+
+  /**
+   * Find shortest path between two nodes using Cypher
+   */
+  async findShortestPath(startNodeId: string, endNodeId: string) {
+    if (!AGE_ENABLED) {
+      throw new Error('AGE is not enabled');
+    }
+    return ageClientService.findShortestPath(startNodeId, endNodeId);
+  },
+
+  /**
+   * Find all paths between nodes using Cypher
+   */
+  async findPaths(startNodeId: string, endNodeId: string, maxHops: number = 5) {
+    if (!AGE_ENABLED) {
+      throw new Error('AGE is not enabled');
+    }
+    return ageClientService.findPaths(startNodeId, endNodeId, maxHops);
+  },
+
+  /**
+   * Get node neighbors using Cypher
+   */
+  async getNodeNeighbors(nodeId: string, direction: 'in' | 'out' | 'both' = 'both') {
+    if (!AGE_ENABLED) {
+      throw new Error('AGE is not enabled');
+    }
+    return ageClientService.getNeighbors(nodeId, direction);
+  },
+
+  /**
+   * Get session graph from AGE (for visualization)
+   */
+  async getGraphFromAGE(sessionId: string) {
+    if (!AGE_ENABLED) {
+      throw new Error('AGE is not enabled');
+    }
+    return ageClientService.getSessionGraph(sessionId);
+  },
+
+  /**
+   * Execute custom Cypher query
+   */
+  async executeCypher<T = Record<string, unknown>>(cypher: string): Promise<T[]> {
+    if (!AGE_ENABLED) {
+      throw new Error('AGE is not enabled');
+    }
+    return ageClientService.executeCypher<T>(cypher);
   },
 };
