@@ -82,11 +82,14 @@ export function Sidebar({ currentSessionId, onSessionSelect, onNewSession }: Sid
         ) : (
           <div className="space-y-1">
             {sessions.map((session) => (
-              <button
+              <div
                 key={session.id}
                 onClick={() => onSessionSelect(session.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && onSessionSelect(session.id)}
                 className={clsx(
-                  'w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors group',
+                  'w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors group cursor-pointer',
                   currentSessionId === session.id
                     ? 'bg-gray-700 text-white'
                     : 'text-gray-300 hover:bg-gray-800'
@@ -100,7 +103,7 @@ export function Sidebar({ currentSessionId, onSessionSelect, onNewSession }: Sid
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
-              </button>
+              </div>
             ))}
           </div>
         )}

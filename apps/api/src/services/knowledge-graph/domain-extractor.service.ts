@@ -44,14 +44,24 @@ Extract the complete domain model. Return ONLY valid JSON.`;
         relevantEdges: [],
       });
 
-      // Parse the JSON response
+      // Parse the JSON response - handle potential malformed JSON from Claude
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         console.error('No JSON found in response');
         return { nodes: [], edges: [] };
       }
 
-      const parsed = JSON.parse(jsonMatch[0]) as {
+      let jsonStr = jsonMatch[0];
+
+      // Try to fix common JSON issues from LLM responses
+      // Remove trailing commas before ] or }
+      jsonStr = jsonStr.replace(/,(\s*[\]}])/g, '$1');
+      // Remove comments
+      jsonStr = jsonStr.replace(/\/\/[^\n]*/g, '');
+      // Remove markdown code blocks if present
+      jsonStr = jsonStr.replace(/```json?\s*/g, '').replace(/```\s*/g, '');
+
+      let parsed: {
         nodes?: Array<{
           id: string;
           name: string;
@@ -65,6 +75,26 @@ Extract the complete domain model. Return ONLY valid JSON.`;
           properties?: Record<string, unknown>;
         }>;
       };
+
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (parseError) {
+        console.error('JSON parse error, attempting recovery...', parseError);
+        // Try more aggressive cleanup
+        jsonStr = jsonStr
+          .replace(/[\x00-\x1F\x7F]/g, ' ') // Remove control characters
+          .replace(/\n\s*\n/g, '\n') // Remove empty lines
+          .replace(/,\s*,/g, ',') // Remove double commas
+          .replace(/\[\s*,/g, '[') // Remove leading commas in arrays
+          .replace(/,\s*\]/g, ']'); // Remove trailing commas in arrays
+
+        try {
+          parsed = JSON.parse(jsonStr);
+        } catch (e) {
+          console.error('JSON recovery failed:', e);
+          return { nodes: [], edges: [] };
+        }
+      }
 
       // Validate nodes
       const validNodes = this.validateNodes(parsed.nodes || []);
