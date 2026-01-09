@@ -1,0 +1,24 @@
+{
+  "name": "context-engine",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Context Understanding Engine with Knowledge Graph System",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "clean": "turbo clean && rm -rf node_modules",
+    "db:generate": "pnpm --filter @context-engine/db generate",
+    "db:migrate": "pnpm --filter @context-engine/db migrate",
+    "db:studio": "pnpm --filter @context-engine/db studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
