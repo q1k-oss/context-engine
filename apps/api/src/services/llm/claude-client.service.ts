@@ -20,23 +20,41 @@ function buildSystemPrompt(context: ClaudeContext): string {
 
   // Add knowledge graph context if available
   if (context.relevantNodes.length > 0) {
-    systemPrompt += '\n\n## Current Context (from Knowledge Graph)\n';
-    systemPrompt += 'The following entities and concepts are relevant to this conversation:\n\n';
+    systemPrompt += '\n\n---\n## CAPTURED KNOWLEDGE (from conversation so far)\n';
 
+    // Group nodes by type for better organization
+    const nodesByType = new Map<string, typeof context.relevantNodes>();
     for (const node of context.relevantNodes) {
-      systemPrompt += `- **${node.name}** (${node.type})`;
-      if (node.description) {
-        systemPrompt += `: ${node.description}`;
+      const existing = nodesByType.get(node.type) || [];
+      existing.push(node);
+      nodesByType.set(node.type, existing);
+    }
+
+    // Display grouped nodes
+    for (const [type, nodes] of nodesByType) {
+      systemPrompt += `\n### ${type}s:\n`;
+      for (const node of nodes) {
+        systemPrompt += `- **${node.name}**`;
+        if (node.description) {
+          systemPrompt += `: ${node.description}`;
+        }
+        systemPrompt += '\n';
       }
-      systemPrompt += '\n';
     }
   }
 
   if (context.relevantEdges.length > 0) {
     systemPrompt += '\n### Relationships:\n';
     for (const edge of context.relevantEdges) {
-      systemPrompt += `- ${edge.source} ${edge.relationship.replace(/_/g, ' ').toLowerCase()} ${edge.target}\n`;
+      systemPrompt += `- ${edge.source} → ${edge.relationship.replace(/_/g, ' ').toLowerCase()} → ${edge.target}\n`;
     }
+  }
+
+  // Add summary stats
+  if (context.relevantNodes.length > 0 || context.relevantEdges.length > 0) {
+    systemPrompt += `\n*Total: ${context.relevantNodes.length} nodes, ${context.relevantEdges.length} relationships captured*\n`;
+  } else {
+    systemPrompt += '\n\n---\n## CAPTURED KNOWLEDGE\n*No knowledge captured yet. Start by understanding the user\'s requirements.*\n';
   }
 
   return systemPrompt;
