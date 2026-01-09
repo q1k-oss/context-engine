@@ -502,6 +502,11 @@ export function GraphViewer({ sessionId, version }: GraphViewerProps) {
         nodeColor={(node: any) => node.color}
         nodeVal={(node: any) => node.val}
         nodeCanvasObject={(node: any, ctx, globalScale) => {
+          // Guard against uninitialized coordinates
+          if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) {
+            return;
+          }
+
           const size = node.val || 5;
           const shape = nodeShapes[node.nodeType] || 'circle';
           const isHighlighted = selectedNode?.id === node.id || hoveredNode?.id === node.id;
