@@ -672,7 +672,7 @@ export const graphBuilderService = {
       sessionId,
       versionFrom: currentVersion,
       versionTo: newVersion,
-      triggerMessageId: messageId || null,
+      triggerMessageId: messageId ?? undefined,
       additions: deltaData.additions,
       modifications: deltaData.modifications,
       removals: deltaData.removals,
@@ -690,7 +690,7 @@ export const graphBuilderService = {
       sessionId,
       versionFrom: currentVersion,
       versionTo: newVersion,
-      triggerMessageId: messageId || null,
+      triggerMessageId: messageId ?? undefined,
       deltaData,
       createdAt: new Date(),
     });

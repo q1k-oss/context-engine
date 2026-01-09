@@ -36,7 +36,7 @@ export const ageClientService = {
       $$) as (result agtype);
     `);
 
-    return result.map((row: { result: string }) => {
+    return result.map((row: any) => {
       // AGE returns agtype which needs parsing
       return JSON.parse(row.result) as T;
     });

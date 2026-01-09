@@ -223,6 +223,12 @@ export const chatOrchestratorService = {
       },
     };
 
+    // Auto-generate session title from first user message
+    if (nextSequence === 1 && session.title === 'New Conversation') {
+      const title = content.length > 50 ? content.substring(0, 50) + '...' : content;
+      await db.update(sessions).set({ title }).where(eq(sessions.id, sessionId));
+    }
+
     // Process both messages for knowledge graph (async, non-blocking)
     // Uses smart processing to automatically detect documentation and use domain extraction
     try {

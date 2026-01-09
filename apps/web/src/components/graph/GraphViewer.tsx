@@ -29,6 +29,9 @@ interface GraphNode {
   val: number; // Node size
   color: string;
   graphData?: Record<string, unknown>; // Domain properties
+  // Position properties (added by force-graph)
+  x?: number;
+  y?: number;
 }
 
 interface GraphLink {
@@ -217,17 +220,17 @@ export function GraphViewer({ sessionId, version }: GraphViewerProps) {
     setGraphData({ nodes, links });
   }, [graph]);
 
-  const handleNodeClick = useCallback((node: GraphNode) => {
-    setSelectedNode(node);
+  const handleNodeClick = useCallback((node: any) => {
+    setSelectedNode(node as GraphNode);
     // Center on clicked node
-    if (graphRef.current) {
+    if (graphRef.current && node) {
       graphRef.current.centerAt(node.x, node.y, 1000);
       graphRef.current.zoom(2, 1000);
     }
   }, []);
 
-  const handleNodeHover = useCallback((node: GraphNode | null) => {
-    setHoveredNode(node);
+  const handleNodeHover = useCallback((node: any) => {
+    setHoveredNode(node as GraphNode | null);
     if (containerRef.current) {
       containerRef.current.style.cursor = node ? 'pointer' : 'default';
     }

@@ -15,6 +15,11 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [graphVersion, setGraphVersion] = useState(0);
 
+  // Apply dark mode on mount
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
+
   // Create a new session on first load
   useEffect(() => {
     const initSession = async () => {
@@ -111,19 +116,22 @@ export default function Home() {
           </nav>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-hidden">
-          {viewMode === 'chat' && sessionId && (
-            <ChatContainer sessionId={sessionId} onGraphUpdate={handleGraphUpdate} />
-          )}
-          {viewMode === 'graph' && sessionId && (
-            <GraphViewer sessionId={sessionId} version={graphVersion} />
-          )}
-          {viewMode === 'timeline' && sessionId && (
-            <EvolutionTimeline sessionId={sessionId} />
-          )}
-          {!sessionId && (
-            <div className="flex items-center justify-center h-full text-gray-500">
+        {/* Content - Keep all components mounted, use CSS to show/hide */}
+        <div className="flex-1 overflow-hidden relative">
+          {sessionId ? (
+            <>
+              <div className={clsx('absolute inset-0', viewMode !== 'chat' && 'invisible')}>
+                <ChatContainer sessionId={sessionId} onGraphUpdate={handleGraphUpdate} />
+              </div>
+              <div className={clsx('absolute inset-0', viewMode !== 'graph' && 'hidden')}>
+                <GraphViewer sessionId={sessionId} version={graphVersion} />
+              </div>
+              <div className={clsx('absolute inset-0', viewMode !== 'timeline' && 'hidden')}>
+                <EvolutionTimeline sessionId={sessionId} />
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
               Loading session...
             </div>
           )}
