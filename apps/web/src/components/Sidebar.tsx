@@ -16,15 +16,16 @@ interface SidebarProps {
   currentSessionId: string | null;
   onSessionSelect: (sessionId: string) => void;
   onNewSession: () => void;
+  refreshTrigger?: number;
 }
 
-export function Sidebar({ currentSessionId, onSessionSelect, onNewSession }: SidebarProps) {
+export function Sidebar({ currentSessionId, onSessionSelect, onNewSession, refreshTrigger }: SidebarProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     loadSessions();
-  }, [currentSessionId]);
+  }, [currentSessionId, refreshTrigger]);
 
   const loadSessions = async () => {
     try {

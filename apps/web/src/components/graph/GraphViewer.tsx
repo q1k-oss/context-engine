@@ -174,26 +174,53 @@ export function GraphViewer({ sessionId, version }: GraphViewerProps) {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
 
-  // Update dimensions on resize
+  // Update dimensions on resize using ResizeObserver
   useEffect(() => {
     const updateDimensions = () => {
       if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
+        const { clientWidth, clientHeight } = containerRef.current;
+        if (clientWidth > 0 && clientHeight > 0) {
+          setDimensions({
+            width: clientWidth,
+            height: clientHeight,
+          });
+        }
       }
     };
 
     updateDimensions();
+
+    // Use ResizeObserver for better dimension detection when component becomes visible
+    const resizeObserver = new ResizeObserver(() => {
+      updateDimensions();
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
     window.addEventListener('resize', updateDimensions);
-    return () => window.removeEventListener('resize', updateDimensions);
+    return () => {
+      window.removeEventListener('resize', updateDimensions);
+      resizeObserver.disconnect();
+    };
   }, []);
 
   // Refresh graph when version changes
   useEffect(() => {
     refresh();
   }, [version, refresh]);
+
+  // Auto-fit view when graph data changes
+  useEffect(() => {
+    if (graphRef.current && graphData.nodes.length > 0) {
+      // Small delay to let force simulation settle
+      const timer = setTimeout(() => {
+        graphRef.current?.zoomToFit(400, 50);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [graphData.nodes.length]);
 
   // Convert graph data to force graph format
   useEffect(() => {

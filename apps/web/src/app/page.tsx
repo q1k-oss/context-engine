@@ -14,6 +14,7 @@ export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [graphVersion, setGraphVersion] = useState(0);
+  const [sidebarRefresh, setSidebarRefresh] = useState(0);
 
   // Apply dark mode on mount
   useEffect(() => {
@@ -43,6 +44,8 @@ export default function Home() {
 
   const handleGraphUpdate = (newVersion: number) => {
     setGraphVersion(newVersion);
+    // Refresh sidebar to get updated session title
+    setSidebarRefresh((prev) => prev + 1);
   };
 
   return (
@@ -51,6 +54,7 @@ export default function Home() {
       <Sidebar
         currentSessionId={sessionId}
         onSessionSelect={setSessionId}
+        refreshTrigger={sidebarRefresh}
         onNewSession={() => {
           fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/chat/sessions`, {
             method: 'POST',

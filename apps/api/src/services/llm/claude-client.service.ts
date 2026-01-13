@@ -177,4 +177,34 @@ Be conservative - only extract entities/concepts with confidence > 0.5. Focus on
 
     return { entities: [], concepts: [], relationships: [] };
   },
+
+  /**
+   * Generate a concise chat title from the first message exchange
+   */
+  async generateChatTitle(userMessage: string, assistantResponse: string): Promise<string> {
+    try {
+      const response = await getClient().messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 50,
+        messages: [
+          {
+            role: 'user',
+            content: `Generate a very short, concise title (3-6 words max) for this conversation. Return ONLY the title text, no quotes or punctuation.
+
+User message: ${userMessage.substring(0, 300)}
+
+Assistant response: ${assistantResponse.substring(0, 300)}`,
+          },
+        ],
+      });
+
+      const textBlock = response.content.find((block) => block.type === 'text');
+      const title = textBlock?.type === 'text' ? textBlock.text.trim() : 'New Conversation';
+      // Clean up and limit length
+      return title.replace(/^["']|["']$/g, '').substring(0, 60);
+    } catch (error) {
+      console.error('Failed to generate chat title:', error);
+      return userMessage.length > 40 ? userMessage.substring(0, 40) + '...' : userMessage;
+    }
+  },
 };
