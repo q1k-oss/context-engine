@@ -23,6 +23,9 @@ export const EdgeType = {
   ConstrainedBy: 'CONSTRAINED_BY',
   DerivedFrom: 'DERIVED_FROM',
   TemporallyPrecedes: 'TEMPORALLY_PRECEDES',
+  CoOccurs: 'CO_OCCURS',
+  Supersedes: 'SUPERSEDES',
+  EvidenceFor: 'EVIDENCE_FOR',
 } as const;
 
 export type EdgeType = (typeof EdgeType)[keyof typeof EdgeType];

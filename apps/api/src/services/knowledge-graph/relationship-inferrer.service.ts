@@ -58,40 +58,6 @@ export const relationshipInferrerService = {
       }
     }
 
-    // Also infer temporal relationships for sequential nodes
-    const sortedNodes = [...nodes].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-
-    for (let i = 0; i < sortedNodes.length - 1; i++) {
-      const current = sortedNodes[i];
-      const next = sortedNodes[i + 1];
-
-      // Only create temporal links if both nodes are from the same message or adjacent messages
-      if (current && next) {
-        const timeDiff = new Date(next.createdAt).getTime() - new Date(current.createdAt).getTime();
-
-        // If nodes were created within 1 minute of each other, they're likely related
-        if (timeDiff < 60000) {
-          const exists = existingEdges.some(
-            (e) =>
-              e.sourceNodeId === current.id &&
-              e.targetNodeId === next.id &&
-              e.edgeType === 'TEMPORALLY_PRECEDES'
-          );
-
-          if (!exists) {
-            relationships.push({
-              sourceNodeId: current.id,
-              targetNodeId: next.id,
-              edgeType: 'TEMPORALLY_PRECEDES',
-              weight: 0.5,
-            });
-          }
-        }
-      }
-    }
-
     return relationships;
   },
 

@@ -1,4 +1,4 @@
-import type { KnowledgeNode, Message } from '@context-engine/shared';
+import type { KnowledgeNode, Message, NodeType } from '@context-engine/shared';
 
 interface PriorityUpdate {
   nodeId: string;
@@ -46,10 +46,11 @@ export const priorityCalculatorService = {
       // Base priority from confidence
       let newPriority = Number(node.confidenceScore) * 0.3;
 
-      // Recency factor (decay over time)
+      // Recency factor (logarithmic decay over 7 days)
+      // 24h: ~50%, 72h: ~33%, 7d: ~24% (vs old linear: 0% at 24h)
       const ageMs = now - new Date(node.updatedAt).getTime();
       const ageHours = ageMs / (1000 * 60 * 60);
-      const recencyFactor = Math.max(0, 1 - ageHours / 24); // Decay over 24 hours
+      const recencyFactor = 1 / (1 + Math.log2(1 + ageHours / 24));
       newPriority += recencyFactor * 0.3;
 
       // Frequency factor
@@ -64,8 +65,12 @@ export const priorityCalculatorService = {
         }
       }
 
-      // Clamp to [0, 1]
-      newPriority = Math.max(0, Math.min(1, newPriority));
+      // Apply node-type priority floors: Decision/Goal nodes never drop below 0.2
+      const nodeType = node.nodeType as NodeType;
+      const priorityFloor = (nodeType === 'Decision' || nodeType === 'Intent') ? 0.2 : 0;
+
+      // Clamp to [floor, 1]
+      newPriority = Math.max(priorityFloor, Math.min(1, newPriority));
 
       // Only update if there's a significant change
       if (Math.abs(newPriority - previousPriority) > 0.05) {

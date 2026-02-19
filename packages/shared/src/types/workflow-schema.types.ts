@@ -317,3 +317,128 @@ export function meetsConfidenceThreshold(confidence: number, isEdge: boolean = f
     : ExtractionConfig.minConfidence;
   return confidence >= threshold;
 }
+
+// =============================================================================
+// UNIFIED EXTRACTION TYPES - Three-thought framework
+// =============================================================================
+
+export interface EntityAlias {
+  canonicalName: string;
+  aliases: string[];
+}
+
+export type ContradictionChangeType = 'supersedes' | 'refines' | 'contradicts';
+
+export interface Contradiction {
+  subject: string;
+  previousValue: string;
+  newValue: string;
+  changeType: ContradictionChangeType;
+  evidence: string;
+}
+
+export interface ReasoningLink {
+  decisionName: string;
+  evidenceList: string[];
+  rationale: string;
+}
+
+export interface CoOccurrence {
+  entity1: string;
+  entity2: string;
+  contextSentence: string;
+}
+
+export interface UnifiedExtractionResult {
+  nodes: ExtractedNode[];
+  edges: Array<ExtractedEdge & { description: string }>;
+  entityAliases: EntityAlias[];
+  coOccurrences: CoOccurrence[];
+  contradictions: Contradiction[];
+  reasoningLinks: ReasoningLink[];
+}
+
+// =============================================================================
+// UNIFIED EXTRACTION PROMPT - Three-thought framework (single LLM call)
+// =============================================================================
+
+export const UnifiedExtractionPrompt = `You are a precise knowledge graph extraction system. You will receive a USER message and an ASSISTANT message from a conversation turn. Extract structured information using a three-thought framework.
+
+THOUGHT 1 - IDENTIFY ENTITIES & ALIASES:
+- Identify key terms, concepts, decisions, goals, tasks, resources, constraints, facts, and states
+- For each entity, determine if it is an alias of an existing node (check EXISTING NODES list)
+- Output canonical names and any aliases
+
+THOUGHT 2 - DETERMINE RELATIONSHIPS & CO-OCCURRENCES:
+- Determine how entities relate using these edge types: ACHIEVES, REQUIRES, BLOCKS, DECIDES, USES, SUPPORTS, PART_OF, HAS_STATE, CO_OCCURS, SUPERSEDES, EVIDENCE_FOR
+- For each relationship, provide a full natural-language description (not truncated)
+- Track co-occurrences: entities mentioned together in the same sentence/context
+
+THOUGHT 3 - DETECT CONTRADICTIONS & REASONING:
+- Detect when a new statement contradicts or supersedes a previous one
+- Link decisions to their supporting evidence/facts
+- Classify changes as: supersedes (replaces), refines (narrows/adjusts), contradicts (conflicts)
+
+RULES:
+1. Only extract items EXPLICITLY stated - never infer
+2. Confidence >= 0.7 required
+3. User messages contain intents/goals; Assistant messages contain decisions/recommendations
+4. Quality over quantity
+
+NODE TYPES: Goal, Task, Decision, Constraint, Resource, Fact, State
+
+OUTPUT FORMAT (JSON only):
+{
+  "nodes": [
+    {
+      "name": "exact name",
+      "type": "Goal|Task|Decision|Constraint|Resource|Fact|State",
+      "confidence": 0.0-1.0,
+      "source": "quote from message"
+    }
+  ],
+  "edges": [
+    {
+      "from": "source node name",
+      "to": "target node name",
+      "type": "ACHIEVES|REQUIRES|BLOCKS|DECIDES|USES|SUPPORTS|PART_OF|HAS_STATE|CO_OCCURS|SUPERSEDES|EVIDENCE_FOR",
+      "confidence": 0.0-1.0,
+      "source": "quote showing relationship",
+      "description": "full natural-language description of this relationship"
+    }
+  ],
+  "entityAliases": [
+    {
+      "canonicalName": "primary name",
+      "aliases": ["alt name 1", "alt name 2"]
+    }
+  ],
+  "coOccurrences": [
+    {
+      "entity1": "name1",
+      "entity2": "name2",
+      "contextSentence": "sentence where both appear"
+    }
+  ],
+  "contradictions": [
+    {
+      "subject": "entity name",
+      "previousValue": "what was stated before",
+      "newValue": "what is stated now",
+      "changeType": "supersedes|refines|contradicts",
+      "evidence": "quote showing the change"
+    }
+  ],
+  "reasoningLinks": [
+    {
+      "decisionName": "decision entity name",
+      "evidenceList": ["fact1", "fact2"],
+      "rationale": "why this decision was made based on the evidence"
+    }
+  ]
+}
+
+IMPORTANT:
+- Return empty arrays for sections with no confident extractions
+- Include "description" on every edge - this is the full relationship context, NOT truncated
+- Mark user-originated items (goals, tasks, constraints) separately from assistant-originated items (decisions, recommendations)`;

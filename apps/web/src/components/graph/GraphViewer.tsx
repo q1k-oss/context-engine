@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { forceX, forceY, forceCollide } from 'd3-force';
 import { useKnowledgeGraph } from '@/hooks/useKnowledgeGraph';
 import { RefreshCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
@@ -145,6 +146,21 @@ const edgeColors: Record<string, string> = {
   CONSTRAINED_BY: '#ec4899',
   DERIVED_FROM: '#6b7280',
   TEMPORALLY_PRECEDES: '#3b82f6',
+
+  // New KG edge types
+  CO_OCCURS: '#94a3b8',       // slate - co-occurrence
+  SUPERSEDES: '#f43f5e',      // rose - supersession
+  EVIDENCE_FOR: '#22d3ee',    // cyan - evidence links
+
+  // Workflow edge types
+  ACHIEVES: '#10b981',
+  REQUIRES: '#f59e0b',
+  BLOCKS: '#ef4444',
+  DECIDES: '#8b5cf6',
+  USES: '#3b82f6',
+  SUPPORTS: '#22c55e',
+  PART_OF: '#6366f1',
+  HAS_STATE: '#a78bfa',
 };
 
 // Helper to darken/lighten colors
@@ -210,6 +226,27 @@ export function GraphViewer({ sessionId, version }: GraphViewerProps) {
   useEffect(() => {
     refresh();
   }, [version, refresh]);
+
+  // Configure D3 forces for better layout of disconnected components
+  useEffect(() => {
+    if (!graphRef.current) return;
+    const fg = graphRef.current;
+
+    // Stronger charge to spread nodes within clusters
+    fg.d3Force('charge')?.strength(-150).distanceMax(400);
+
+    // Increase link distance so connected nodes aren't on top of each other
+    fg.d3Force('link')?.distance(70);
+
+    // Gravity forces pull disconnected clusters toward center
+    fg.d3Force('x', forceX(0).strength(0.06));
+    fg.d3Force('y', forceY(0).strength(0.06));
+
+    // Collision force prevents node/label overlap
+    fg.d3Force('collide', forceCollide((node: any) => (node.val || 5) + 12));
+
+    fg.d3ReheatSimulation();
+  }, [graphData]);
 
   // Auto-fit view when graph data changes
   useEffect(() => {
@@ -608,17 +645,32 @@ export function GraphViewer({ sessionId, version }: GraphViewerProps) {
 
           // Draw label
           if (globalScale > 0.5) {
-            const label = node.name;
+            const maxLabelLen = globalScale > 1.5 ? 40 : 22;
+            const label = node.name.length > maxLabelLen
+              ? node.name.substring(0, maxLabelLen - 1) + '…'
+              : node.name;
             const fontSize = Math.max(11 / globalScale, 4);
             ctx.font = `${isHighlighted ? 'bold ' : ''}${fontSize}px Inter, system-ui, sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
 
-            // Text shadow for readability
-            ctx.fillStyle = 'rgba(255,255,255,0.8)';
-            ctx.fillText(label, node.x + 0.5, node.y + size + 3.5);
-            ctx.fillStyle = '#1f2937';
-            ctx.fillText(label, node.x, node.y + size + 3);
+            // Background pill for readability
+            const textWidth = ctx.measureText(label).width;
+            const labelY = node.y + size + 3;
+            const padX = 3 / globalScale;
+            const padY = 1.5 / globalScale;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+            ctx.beginPath();
+            ctx.roundRect(
+              node.x - textWidth / 2 - padX,
+              labelY - padY,
+              textWidth + padX * 2,
+              fontSize + padY * 2,
+              3 / globalScale
+            );
+            ctx.fill();
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillText(label, node.x, labelY);
           }
 
           // Draw type badge for larger zoom

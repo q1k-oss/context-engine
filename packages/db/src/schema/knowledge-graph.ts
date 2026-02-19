@@ -87,6 +87,24 @@ export const graphVersions = pgTable('graph_versions', {
 ]);
 
 /**
+ * Node aliases table - tracks alternative names for entities
+ * Used for entity resolution / deduplication
+ */
+export const nodeAliases = pgTable('node_aliases', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'cascade' }).notNull(),
+  nodeId: uuid('node_id').references(() => knowledgeNodes.id, { onDelete: 'cascade' }).notNull(),
+  alias: varchar('alias', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index('idx_aliases_session_alias').on(table.sessionId, table.alias),
+  index('idx_aliases_node').on(table.nodeId),
+]);
+
+export type NodeAlias = typeof nodeAliases.$inferSelect;
+export type NewNodeAlias = typeof nodeAliases.$inferInsert;
+
+/**
  * Relations for knowledge nodes
  */
 export const knowledgeNodesRelations = relations(knowledgeNodes, ({ one, many }) => ({
@@ -100,6 +118,18 @@ export const knowledgeNodesRelations = relations(knowledgeNodes, ({ one, many })
   }),
   outgoingEdges: many(knowledgeEdges, { relationName: 'sourceNode' }),
   incomingEdges: many(knowledgeEdges, { relationName: 'targetNode' }),
+  aliases: many(nodeAliases),
+}));
+
+export const nodeAliasesRelations = relations(nodeAliases, ({ one }) => ({
+  node: one(knowledgeNodes, {
+    fields: [nodeAliases.nodeId],
+    references: [knowledgeNodes.id],
+  }),
+  session: one(sessions, {
+    fields: [nodeAliases.sessionId],
+    references: [sessions.id],
+  }),
 }));
 
 /**

@@ -1,5 +1,5 @@
 import { db } from '@context-engine/db';
-import { knowledgeNodes, knowledgeEdges, contextDeltas, graphVersions, messages } from '@context-engine/db/schema';
+import { knowledgeNodes, knowledgeEdges, contextDeltas, graphVersions, messages, nodeAliases } from '@context-engine/db/schema';
 import { eq, and, desc, gte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import type {
@@ -13,6 +13,8 @@ import type {
   DomainGraph,
   DomainNode,
   DomainEdge,
+  UnifiedExtractionResult,
+  EntityAlias,
 } from '@context-engine/shared';
 import { entityExtractorService } from './entity-extractor.service.js';
 import { relationshipInferrerService } from './relationship-inferrer.service.js';
@@ -21,6 +23,25 @@ import { ageClientService } from '../graph/age-client.service.js';
 
 // Flag to enable/disable AGE sync (can be controlled via env var)
 const AGE_ENABLED = process.env.AGE_ENABLED !== 'false';
+
+/**
+ * Compute Levenshtein distance between two strings
+ */
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i]![0] = i;
+  for (let j = 0; j <= n; j++) dp[0]![j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i]![j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1]![j - 1]!
+        : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!);
+    }
+  }
+  return dp[m]![n]!;
+}
 
 /**
  * Graph Builder Service
@@ -754,5 +775,488 @@ export const graphBuilderService = {
 
     // Use regular message processing for conversational content
     return this.processMessage(sessionId, message);
+  },
+
+  /**
+   * Resolve an entity name to an existing node using multi-strategy matching:
+   * 1. Exact name match
+   * 2. Alias table lookup
+   * 3. LLM-identified aliases from extraction result
+   * 4. Levenshtein distance <= 2 for names > 5 chars
+   */
+  async resolveEntity(
+    name: string,
+    sessionId: string,
+    existingNodes: Array<{ id: string; name: string; nodeType: string; graphData: unknown }>,
+    extractionAliases: EntityAlias[]
+  ): Promise<{ id: string; name: string; nodeType: string; graphData: unknown } | undefined> {
+    const lowerName = name.toLowerCase();
+
+    // 1. Exact name match
+    const exactMatch = existingNodes.find(n => n.name.toLowerCase() === lowerName);
+    if (exactMatch) return exactMatch;
+
+    // 2. Alias table lookup
+    const aliasRows = await db.query.nodeAliases.findMany({
+      where: and(
+        eq(nodeAliases.sessionId, sessionId),
+        eq(nodeAliases.alias, lowerName)
+      ),
+    });
+    if (aliasRows.length > 0) {
+      const aliasMatch = existingNodes.find(n => n.id === aliasRows[0]!.nodeId);
+      if (aliasMatch) return aliasMatch;
+    }
+
+    // 3. LLM-identified aliases from extraction result
+    for (const alias of extractionAliases) {
+      if (alias.canonicalName.toLowerCase() === lowerName) {
+        // The name IS the canonical - check if any existing node matches an alias
+        for (const alt of alias.aliases) {
+          const match = existingNodes.find(n => n.name.toLowerCase() === alt.toLowerCase());
+          if (match) return match;
+        }
+      }
+      if (alias.aliases.some(a => a.toLowerCase() === lowerName)) {
+        // The name IS an alias - find the canonical
+        const match = existingNodes.find(n => n.name.toLowerCase() === alias.canonicalName.toLowerCase());
+        if (match) return match;
+      }
+    }
+
+    // 4. Levenshtein distance <= 2 for names > 5 chars
+    if (name.length > 5) {
+      for (const node of existingNodes) {
+        if (node.name.length > 5 && levenshteinDistance(lowerName, node.name.toLowerCase()) <= 2) {
+          return node;
+        }
+      }
+    }
+
+    return undefined;
+  },
+
+  /**
+   * Process a user+assistant message pair with unified extraction (single LLM call)
+   * Replaces the old pattern of 6 separate LLM calls per turn.
+   */
+  async processMessagePair(
+    sessionId: string,
+    userMessage: Message,
+    assistantMessage: Message
+  ): Promise<GraphBuildResult> {
+    // Get existing graph
+    const existingNodes = await db.query.knowledgeNodes.findMany({
+      where: and(
+        eq(knowledgeNodes.sessionId, sessionId),
+        eq(knowledgeNodes.isDeleted, false)
+      ),
+    });
+
+    const existingEdges = await db.query.knowledgeEdges.findMany({
+      where: and(
+        eq(knowledgeEdges.sessionId, sessionId),
+        eq(knowledgeEdges.isDeleted, false)
+      ),
+    });
+
+    // Get current version
+    const latestVersion = await db.query.graphVersions.findFirst({
+      where: eq(graphVersions.sessionId, sessionId),
+      orderBy: [desc(graphVersions.version)],
+    });
+    const currentVersion = latestVersion?.version || 0;
+    const newVersion = currentVersion + 1;
+
+    // Single unified extraction for both messages
+    const existingNodeNames = existingNodes.map(n => ({ name: n.name, type: n.nodeType }));
+    const extraction = await entityExtractorService.extractUnified(
+      userMessage.content,
+      assistantMessage.content,
+      existingNodeNames
+    );
+
+    const nodesAdded: KnowledgeNode[] = [];
+    const nodesModified: KnowledgeNode[] = [];
+    const edgesAdded: KnowledgeEdge[] = [];
+
+    // Track name -> nodeId for edge resolution
+    const nameToNodeId = new Map<string, string>();
+    for (const n of existingNodes) {
+      nameToNodeId.set(n.name.toLowerCase(), n.id);
+    }
+
+    // --- Process Nodes with entity resolution ---
+    for (const node of extraction.nodes) {
+      const resolved = await this.resolveEntity(
+        node.name,
+        sessionId,
+        existingNodes as Array<{ id: string; name: string; nodeType: string; graphData: unknown }>,
+        extraction.entityAliases
+      );
+
+      if (resolved) {
+        // Update existing node
+        const updatedAt = new Date();
+        await db
+          .update(knowledgeNodes)
+          .set({
+            graphData: {
+              ...(resolved.graphData as Record<string, unknown>),
+              ...node.properties,
+              description: node.source,
+            },
+            confidenceScore: String(Math.max(Number((resolved as KnowledgeNode).confidenceScore) || 0, node.confidence)),
+            updatedAt,
+            version: ((resolved as KnowledgeNode).version || 0) + 1,
+          })
+          .where(eq(knowledgeNodes.id, resolved.id));
+
+        nodesModified.push({
+          ...resolved,
+          graphData: { ...(resolved.graphData as Record<string, unknown>), ...node.properties },
+          updatedAt,
+        } as unknown as KnowledgeNode);
+
+        nameToNodeId.set(node.name.toLowerCase(), resolved.id);
+      } else {
+        // Create new node
+        const nodeType = this.mapWorkflowToNodeType(node.type);
+        const priority = nodeType === 'Decision' ? '0.80' : nodeType === 'Intent' ? '0.70' : '0.50';
+        const newNode = {
+          id: uuidv4(),
+          sessionId,
+          nodeType: nodeType,
+          name: node.name,
+          graphData: { ...node.properties, description: node.source },
+          confidenceScore: String(node.confidence),
+          priorityScore: priority,
+          sourceMessageId: userMessage.id,
+          version: 1,
+          isDeleted: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        await db.insert(knowledgeNodes).values(newNode);
+        nodesAdded.push(newNode as unknown as KnowledgeNode);
+        nameToNodeId.set(node.name.toLowerCase(), newNode.id);
+      }
+    }
+
+    // --- Process Aliases: populate nodeAliases table ---
+    for (const alias of extraction.entityAliases) {
+      const canonicalId = nameToNodeId.get(alias.canonicalName.toLowerCase());
+      if (!canonicalId) continue;
+
+      for (const alt of alias.aliases) {
+        // Check if alias already exists
+        const existing = await db.query.nodeAliases.findFirst({
+          where: and(
+            eq(nodeAliases.sessionId, sessionId),
+            eq(nodeAliases.nodeId, canonicalId),
+            eq(nodeAliases.alias, alt.toLowerCase())
+          ),
+        });
+        if (!existing) {
+          await db.insert(nodeAliases).values({
+            id: uuidv4(),
+            sessionId,
+            nodeId: canonicalId,
+            alias: alt.toLowerCase(),
+            createdAt: new Date(),
+          });
+        }
+        // Also register alias in nameToNodeId for edge resolution
+        nameToNodeId.set(alt.toLowerCase(), canonicalId);
+      }
+
+      // Update graphData.aliases on the node
+      const node = [...existingNodes, ...nodesAdded].find(n => n.id === canonicalId);
+      if (node) {
+        const graphData = (node.graphData as Record<string, unknown>) || {};
+        const currentAliases = (graphData.aliases as string[]) || [];
+        const newAliases = [...new Set([...currentAliases, ...alias.aliases])];
+        await db
+          .update(knowledgeNodes)
+          .set({ graphData: { ...graphData, aliases: newAliases } })
+          .where(eq(knowledgeNodes.id, canonicalId));
+      }
+    }
+
+    // --- Process Edges with full descriptions (not truncated) ---
+    for (const edge of extraction.edges) {
+      const sourceId = nameToNodeId.get(edge.from.toLowerCase());
+      const targetId = nameToNodeId.get(edge.to.toLowerCase());
+      if (!sourceId || !targetId || sourceId === targetId) continue;
+
+      // Check for existing edge
+      const exists = existingEdges.some(
+        e => e.sourceNodeId === sourceId && e.targetNodeId === targetId && e.edgeType === edge.type
+      );
+      if (exists) continue;
+
+      const newEdge = {
+        id: uuidv4(),
+        sessionId,
+        sourceNodeId: sourceId,
+        targetNodeId: targetId,
+        edgeType: edge.type as EdgeType,
+        edgeData: { context: edge.source, description: edge.description },
+        weight: String(edge.confidence),
+        isDeleted: false,
+        createdAt: new Date(),
+      };
+
+      await db.insert(knowledgeEdges).values(newEdge);
+      edgesAdded.push(newEdge as unknown as KnowledgeEdge);
+    }
+
+    // --- Process Co-occurrences: create/increment CO_OCCURS edges ---
+    for (const coOcc of extraction.coOccurrences) {
+      const id1 = nameToNodeId.get(coOcc.entity1.toLowerCase());
+      const id2 = nameToNodeId.get(coOcc.entity2.toLowerCase());
+      if (!id1 || !id2 || id1 === id2) continue;
+
+      // Sort to ensure consistent edge direction
+      const [sourceId, targetId] = id1 < id2 ? [id1, id2] : [id2, id1];
+
+      const existingCoOcc = existingEdges.find(
+        e => e.sourceNodeId === sourceId && e.targetNodeId === targetId && e.edgeType === 'CO_OCCURS'
+      );
+
+      if (existingCoOcc) {
+        // Increment weight
+        const newWeight = Number(existingCoOcc.weight) + 0.1;
+        await db
+          .update(knowledgeEdges)
+          .set({ weight: String(Math.min(1, newWeight)) })
+          .where(eq(knowledgeEdges.id, existingCoOcc.id));
+      } else {
+        const newEdge = {
+          id: uuidv4(),
+          sessionId,
+          sourceNodeId: sourceId,
+          targetNodeId: targetId,
+          edgeType: 'CO_OCCURS' as EdgeType,
+          edgeData: { context: coOcc.contextSentence },
+          weight: '0.3',
+          isDeleted: false,
+          createdAt: new Date(),
+        };
+
+        await db.insert(knowledgeEdges).values(newEdge);
+        edgesAdded.push(newEdge as unknown as KnowledgeEdge);
+      }
+    }
+
+    // --- Process Contradictions: create SUPERSEDES edges, reduce superseded node priority ---
+    for (const contradiction of extraction.contradictions) {
+      const subjectId = nameToNodeId.get(contradiction.subject.toLowerCase());
+      if (!subjectId) continue;
+
+      // Find or create a node for the new value
+      const newValueName = `${contradiction.subject} (${contradiction.changeType})`;
+      let newValueId = nameToNodeId.get(newValueName.toLowerCase());
+      if (!newValueId) {
+        const newNode = {
+          id: uuidv4(),
+          sessionId,
+          nodeType: 'Concept' as NodeType,
+          name: newValueName,
+          graphData: {
+            previousValue: contradiction.previousValue,
+            newValue: contradiction.newValue,
+            changeType: contradiction.changeType,
+            evidence: contradiction.evidence,
+          },
+          confidenceScore: '0.85',
+          priorityScore: '0.70',
+          sourceMessageId: userMessage.id,
+          version: 1,
+          isDeleted: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        await db.insert(knowledgeNodes).values(newNode);
+        nodesAdded.push(newNode as unknown as KnowledgeNode);
+        newValueId = newNode.id;
+        nameToNodeId.set(newValueName.toLowerCase(), newNode.id);
+      }
+
+      // Create SUPERSEDES edge
+      const supersedesEdge = {
+        id: uuidv4(),
+        sessionId,
+        sourceNodeId: newValueId,
+        targetNodeId: subjectId,
+        edgeType: 'SUPERSEDES' as EdgeType,
+        edgeData: {
+          changeType: contradiction.changeType,
+          previousValue: contradiction.previousValue,
+          newValue: contradiction.newValue,
+          evidence: contradiction.evidence,
+        },
+        weight: '0.9',
+        isDeleted: false,
+        createdAt: new Date(),
+      };
+      await db.insert(knowledgeEdges).values(supersedesEdge);
+      edgesAdded.push(supersedesEdge as unknown as KnowledgeEdge);
+
+      // Reduce superseded node priority
+      if (contradiction.changeType === 'supersedes') {
+        await db
+          .update(knowledgeNodes)
+          .set({ priorityScore: '0.20', updatedAt: new Date() })
+          .where(eq(knowledgeNodes.id, subjectId));
+      }
+    }
+
+    // --- Process Reasoning Links: create EVIDENCE_FOR edges ---
+    for (const link of extraction.reasoningLinks) {
+      const decisionId = nameToNodeId.get(link.decisionName.toLowerCase());
+      if (!decisionId) continue;
+
+      for (const evidenceName of link.evidenceList) {
+        const evidenceId = nameToNodeId.get(evidenceName.toLowerCase());
+        if (!evidenceId || evidenceId === decisionId) continue;
+
+        const evidenceEdge = {
+          id: uuidv4(),
+          sessionId,
+          sourceNodeId: evidenceId,
+          targetNodeId: decisionId,
+          edgeType: 'EVIDENCE_FOR' as EdgeType,
+          edgeData: { rationale: link.rationale },
+          weight: '0.85',
+          isDeleted: false,
+          createdAt: new Date(),
+        };
+        await db.insert(knowledgeEdges).values(evidenceEdge);
+        edgesAdded.push(evidenceEdge as unknown as KnowledgeEdge);
+      }
+    }
+
+    // Recalculate priorities
+    const allNodes = [...existingNodes, ...nodesAdded] as KnowledgeNode[];
+    const recentMessages = await db.query.messages.findMany({
+      where: eq(messages.sessionId, sessionId),
+      orderBy: [desc(messages.sequenceNumber)],
+      limit: 10,
+    });
+
+    const priorityUpdates = priorityCalculatorService.recalculate(
+      allNodes,
+      recentMessages as Message[],
+      userMessage.content + '\n' + assistantMessage.content
+    );
+
+    for (const update of priorityUpdates) {
+      await db
+        .update(knowledgeNodes)
+        .set({ priorityScore: String(update.newPriority), updatedAt: new Date() })
+        .where(eq(knowledgeNodes.id, update.nodeId));
+    }
+
+    // Create context delta
+    const deltaData = {
+      additions: { nodes: nodesAdded, edges: edgesAdded },
+      modifications: {
+        nodes: nodesModified.map(n => ({
+          nodeId: n.id,
+          previousData: {},
+          newData: n,
+          changedFields: ['graphData', 'confidenceScore'],
+        })),
+        edges: [],
+        priorities: priorityUpdates,
+      },
+      removals: { nodeIds: [], edgeIds: [] },
+    };
+
+    const delta: ContextDelta = {
+      id: uuidv4(),
+      sessionId,
+      versionFrom: currentVersion,
+      versionTo: newVersion,
+      triggerMessageId: userMessage.id,
+      additions: deltaData.additions,
+      modifications: deltaData.modifications,
+      removals: deltaData.removals,
+      summary: `Unified: +${nodesAdded.length} nodes, ~${nodesModified.length} modified, +${edgesAdded.length} edges`,
+      statistics: {
+        additions: nodesAdded.length + edgesAdded.length,
+        modifications: nodesModified.length + priorityUpdates.length,
+        removals: 0,
+      },
+      createdAt: new Date(),
+    };
+
+    await db.insert(contextDeltas).values({
+      id: delta.id,
+      sessionId,
+      versionFrom: currentVersion,
+      versionTo: newVersion,
+      triggerMessageId: userMessage.id,
+      deltaData,
+      createdAt: new Date(),
+    });
+
+    // Create graph version snapshot
+    const updatedNodes = await db.query.knowledgeNodes.findMany({
+      where: and(eq(knowledgeNodes.sessionId, sessionId), eq(knowledgeNodes.isDeleted, false)),
+    });
+    const updatedEdges = await db.query.knowledgeEdges.findMany({
+      where: and(eq(knowledgeEdges.sessionId, sessionId), eq(knowledgeEdges.isDeleted, false)),
+    });
+
+    await db.insert(graphVersions).values({
+      id: uuidv4(),
+      sessionId,
+      version: newVersion,
+      graphSnapshot: {
+        sessionId,
+        version: newVersion,
+        nodes: updatedNodes,
+        edges: updatedEdges,
+        createdAt: new Date(),
+      },
+      createdAt: new Date(),
+    });
+
+    console.log(`Unified extraction: +${nodesAdded.length} nodes, ~${nodesModified.length} modified, +${edgesAdded.length} edges (1 LLM call)`);
+
+    return {
+      nodesAdded,
+      nodesModified,
+      nodesRemoved: [],
+      edgesAdded,
+      edgesModified: [],
+      edgesRemoved: [],
+      delta,
+    };
+  },
+
+  /**
+   * Map workflow node types to legacy NodeType values
+   */
+  mapWorkflowToNodeType(workflowType: string): NodeType {
+    switch (workflowType) {
+      case 'Goal':
+      case 'Task':
+        return 'Intent' as NodeType;
+      case 'Decision':
+        return 'Decision' as NodeType;
+      case 'Constraint':
+      case 'Fact':
+        return 'Concept' as NodeType;
+      case 'Resource':
+        return 'Entity' as NodeType;
+      case 'State':
+        return 'Event' as NodeType;
+      default:
+        return 'Concept' as NodeType;
+    }
   },
 };

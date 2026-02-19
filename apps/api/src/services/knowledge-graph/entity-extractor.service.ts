@@ -2,6 +2,7 @@ import { claudeClientService } from '../llm/claude-client.service.js';
 import { domainExtractorService } from './domain-extractor.service.js';
 import {
   WorkflowExtractionPrompt,
+  UnifiedExtractionPrompt,
   ExtractionConfig,
   ValidRelationships,
   isValidNodeType,
@@ -14,6 +15,11 @@ import {
   type WorkflowNodeType,
   type WorkflowEdgeType,
   type DomainGraph,
+  type UnifiedExtractionResult,
+  type EntityAlias,
+  type Contradiction,
+  type ReasoningLink,
+  type CoOccurrence,
 } from '@context-engine/shared';
 
 /**
@@ -407,5 +413,136 @@ Extract ONLY what is explicitly stated. Return JSON:`;
       console.log('Using workflow extraction for conversational content');
       return this.extractWorkflow(content, existingNodes, conversationContext);
     }
+  },
+
+  /**
+   * Unified extraction: single LLM call for a user+assistant message pair.
+   * Uses three-thought framework to extract nodes, edges, aliases,
+   * co-occurrences, contradictions, and reasoning links.
+   *
+   * Replaces: extract() + extractIntents() + extractDecisions() + infer()
+   * (6 LLM calls → 1)
+   */
+  async extractUnified(
+    userContent: string,
+    assistantContent: string,
+    existingNodes: Array<{ name: string; type: string }>
+  ): Promise<UnifiedExtractionResult> {
+    const existingNodesList = existingNodes.length > 0
+      ? `\nEXISTING NODES IN GRAPH:\n${existingNodes.map(n => `- ${n.name} (${n.type})`).join('\n')}`
+      : '\nNo existing nodes in graph yet.';
+
+    const fullPrompt = `${UnifiedExtractionPrompt}
+${existingNodesList}
+
+USER MESSAGE:
+"${userContent}"
+
+ASSISTANT MESSAGE:
+"${assistantContent}"
+
+Extract using three-thought framework. Return JSON:`;
+
+    try {
+      const response = await claudeClientService.createCompletion({
+        systemPrompt: 'You are a precise knowledge graph extraction system. Output only valid JSON.',
+        messages: [{ role: 'user', content: fullPrompt }],
+        relevantNodes: [],
+        relevantEdges: [],
+      });
+
+      // Parse the JSON response
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return this.emptyUnifiedResult();
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        nodes?: Array<{
+          name: string;
+          type: string;
+          confidence: number;
+          source: string;
+          properties?: Record<string, unknown>;
+        }>;
+        edges?: Array<{
+          from: string;
+          to: string;
+          type: string;
+          confidence: number;
+          source: string;
+          description?: string;
+        }>;
+        entityAliases?: EntityAlias[];
+        coOccurrences?: CoOccurrence[];
+        contradictions?: Contradiction[];
+        reasoningLinks?: ReasoningLink[];
+      };
+
+      // Validate nodes (allow duplicates through - entity resolution handles them in graph-builder)
+      const validNodes: ExtractedNode[] = [];
+      for (const node of (parsed.nodes || [])) {
+        if (!meetsConfidenceThreshold(node.confidence)) continue;
+        if (!isValidNodeType(node.type)) continue;
+        if (!node.source || node.source.trim().length === 0) continue;
+
+        validNodes.push({
+          name: node.name,
+          type: node.type as WorkflowNodeType,
+          confidence: node.confidence,
+          source: node.source,
+          properties: node.properties,
+        });
+      }
+
+      // Validate edges - less strict than workflow validation since unified extraction
+      // produces edge types from both workflow and KG schemas
+      const validEdges: Array<ExtractedEdge & { description: string }> = [];
+      const validEdgeTypes = new Set([
+        'ACHIEVES', 'REQUIRES', 'BLOCKS', 'DECIDES', 'USES', 'SUPPORTS',
+        'PART_OF', 'HAS_STATE', 'CO_OCCURS', 'SUPERSEDES', 'EVIDENCE_FOR',
+        'RELATES_TO', 'CAUSES', 'DEPENDS_ON', 'DECIDED_BY', 'CONSTRAINED_BY', 'DERIVED_FROM',
+      ]);
+
+      for (const edge of (parsed.edges || [])) {
+        if (!meetsConfidenceThreshold(edge.confidence, true)) continue;
+        if (!validEdgeTypes.has(edge.type)) continue;
+
+        validEdges.push({
+          from: edge.from,
+          to: edge.to,
+          type: edge.type as WorkflowEdgeType,
+          confidence: edge.confidence,
+          source: edge.source || '',
+          description: edge.description || edge.source || '',
+        });
+      }
+
+      return {
+        nodes: validNodes,
+        edges: validEdges,
+        entityAliases: parsed.entityAliases || [],
+        coOccurrences: parsed.coOccurrences || [],
+        contradictions: parsed.contradictions || [],
+        reasoningLinks: parsed.reasoningLinks || [],
+      };
+    } catch (error) {
+      console.error('Unified extraction failed:', error);
+      return this.emptyUnifiedResult();
+    }
+  },
+
+  /**
+   * Return an empty UnifiedExtractionResult
+   */
+  emptyUnifiedResult(): UnifiedExtractionResult {
+    return {
+      nodes: [],
+      edges: [],
+      entityAliases: [],
+      coOccurrences: [],
+      contradictions: [],
+      reasoningLinks: [],
+    };
   },
 };

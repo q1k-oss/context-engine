@@ -231,22 +231,20 @@ export const chatOrchestratorService = {
       });
     }
 
-    // Process both messages for knowledge graph (async, non-blocking)
-    // Uses smart processing to automatically detect documentation and use domain extraction
+    // Process message pair with unified extraction (single LLM call instead of 6)
     try {
-      const userGraphResult = await graphBuilderService.processMessageSmart(sessionId, userMessage as Message);
-      const assistantGraphResult = await graphBuilderService.processMessageSmart(sessionId, assistantMessage as Message);
-
-      const totalNodesAdded = userGraphResult.nodesAdded.length + assistantGraphResult.nodesAdded.length;
-      const totalNodesModified = userGraphResult.nodesModified.length + assistantGraphResult.nodesModified.length;
-      const latestVersion = Math.max(userGraphResult.delta.versionTo, assistantGraphResult.delta.versionTo);
+      const graphResult = await graphBuilderService.processMessagePair(
+        sessionId,
+        userMessage as Message,
+        assistantMessage as Message
+      );
 
       yield {
         type: 'graph_update',
         data: {
-          nodesAdded: totalNodesAdded,
-          nodesModified: totalNodesModified,
-          newVersion: latestVersion,
+          nodesAdded: graphResult.nodesAdded.length,
+          nodesModified: graphResult.nodesModified.length,
+          newVersion: graphResult.delta.versionTo,
         },
       };
     } catch (error) {
