@@ -303,6 +303,22 @@ graphRouter.post('/:sessionId/cypher', async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/graph/:sessionId/repair-orphans
+ * Connect orphan nodes to the main graph using LLM-based semantic matching
+ */
+graphRouter.post('/:sessionId/repair-orphans', async (req, res, next) => {
+  try {
+    const result = await graphBuilderService.repairOrphans(req.params.sessionId!);
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // =============================================================================
 // Domain Extraction Endpoints
 // =============================================================================

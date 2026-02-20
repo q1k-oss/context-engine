@@ -1259,4 +1259,135 @@ export const graphBuilderService = {
         return 'Concept' as NodeType;
     }
   },
+
+  /**
+   * Repair orphan nodes by using an LLM call to identify which orphans
+   * relate to which connected nodes, then creating CO_OCCURS edges.
+   */
+  async repairOrphans(sessionId: string): Promise<{ edgesCreated: number; orphansConnected: number }> {
+    const allNodes = await db.query.knowledgeNodes.findMany({
+      where: and(
+        eq(knowledgeNodes.sessionId, sessionId),
+        eq(knowledgeNodes.isDeleted, false)
+      ),
+    });
+
+    const allEdges = await db.query.knowledgeEdges.findMany({
+      where: and(
+        eq(knowledgeEdges.sessionId, sessionId),
+        eq(knowledgeEdges.isDeleted, false)
+      ),
+    });
+
+    // Find orphan nodes (no edges at all)
+    const connectedNodeIds = new Set<string>();
+    for (const edge of allEdges) {
+      connectedNodeIds.add(edge.sourceNodeId);
+      connectedNodeIds.add(edge.targetNodeId);
+    }
+    const orphanNodes = allNodes.filter(n => !connectedNodeIds.has(n.id));
+    const connectedNodes = allNodes.filter(n => connectedNodeIds.has(n.id));
+
+    if (orphanNodes.length === 0) {
+      return { edgesCreated: 0, orphansConnected: 0 };
+    }
+
+    console.log(`Repairing ${orphanNodes.length} orphan nodes for session ${sessionId}`);
+
+    // Ask LLM to match orphans to connected nodes
+    const orphanList = orphanNodes.map(n => `- "${n.name}" (${n.nodeType})`).join('\n');
+    const connectedList = connectedNodes.map(n => `- "${n.name}" (${n.nodeType})`).join('\n');
+
+    const prompt = `You are analyzing a knowledge graph that has orphan nodes (not connected to anything).
+Match each orphan to the most semantically related connected node(s).
+
+ORPHAN NODES:
+${orphanList}
+
+CONNECTED NODES:
+${connectedList}
+
+For each orphan, output which connected node(s) it should be linked to.
+Return JSON array:
+[
+  { "orphan": "exact orphan name", "targets": ["exact connected node name", ...], "reason": "brief reason" }
+]
+
+Rules:
+- Every orphan MUST have at least one target
+- Only use exact names from the lists above
+- Match based on semantic relatedness (same domain concept, part of same workflow, etc.)
+- Return ONLY the JSON array, no other text`;
+
+    try {
+      const { claudeClientService } = await import('../llm/claude-client.service.js');
+      const response = await claudeClientService.createCompletion({
+        systemPrompt: 'You are a knowledge graph repair system. Output only valid JSON.',
+        messages: [{ role: 'user', content: prompt }],
+        relevantNodes: [],
+        relevantEdges: [],
+      });
+
+      const jsonMatch = response.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        console.error('Orphan repair: no JSON in LLM response');
+        return { edgesCreated: 0, orphansConnected: 0 };
+      }
+
+      const matches = JSON.parse(jsonMatch[0]) as Array<{
+        orphan: string;
+        targets: string[];
+        reason: string;
+      }>;
+
+      // Build name -> id map
+      const nameToId = new Map<string, string>();
+      for (const n of allNodes) {
+        nameToId.set(n.name.toLowerCase(), n.id);
+      }
+
+      let edgesCreated = 0;
+      const orphansConnected = new Set<string>();
+
+      for (const match of matches) {
+        const orphanId = nameToId.get(match.orphan.toLowerCase());
+        if (!orphanId) continue;
+
+        for (const targetName of match.targets) {
+          const targetId = nameToId.get(targetName.toLowerCase());
+          if (!targetId || targetId === orphanId) continue;
+
+          // Check edge doesn't already exist
+          const exists = allEdges.some(
+            e => (e.sourceNodeId === orphanId && e.targetNodeId === targetId) ||
+                 (e.sourceNodeId === targetId && e.targetNodeId === orphanId)
+          );
+          if (exists) continue;
+
+          const [sourceId, destId] = orphanId < targetId ? [orphanId, targetId] : [targetId, orphanId];
+
+          await db.insert(knowledgeEdges).values({
+            id: uuidv4(),
+            sessionId,
+            sourceNodeId: sourceId,
+            targetNodeId: destId,
+            edgeType: 'RELATES_TO' as EdgeType,
+            edgeData: { context: match.reason, repairedOrphan: true },
+            weight: '0.5',
+            isDeleted: false,
+            createdAt: new Date(),
+          });
+
+          edgesCreated++;
+          orphansConnected.add(orphanId);
+        }
+      }
+
+      console.log(`Orphan repair complete: ${edgesCreated} edges created, ${orphansConnected.size} orphans connected`);
+      return { edgesCreated, orphansConnected: orphansConnected.size };
+    } catch (error) {
+      console.error('Orphan repair failed:', error);
+      return { edgesCreated: 0, orphansConnected: 0 };
+    }
+  },
 };
