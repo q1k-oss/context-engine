@@ -12,8 +12,8 @@ import {
   unique,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { sessions } from './sessions';
-import { messages } from './messages';
+import { sessions } from './sessions.js';
+import { messages } from './messages.js';
 
 /**
  * Knowledge nodes table - stores entities, concepts, events, etc.

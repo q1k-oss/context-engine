@@ -1,17 +1,23 @@
 {
   "name": "@context-engine/mcp-server",
   "version": "0.1.0",
-  "private": true,
+
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "bin": {
     "context-engine-mcp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "start": "tsx dist/index.js"
   },
   "dependencies": {

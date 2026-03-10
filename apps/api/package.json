@@ -1,13 +1,36 @@
 {
   "name": "@context-engine/api",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./app": {
+      "types": "./dist/app.d.ts",
+      "import": "./dist/app.js"
+    },
+    "./services/*": {
+      "types": "./dist/services/*.d.ts",
+      "import": "./dist/services/*.js"
+    },
+    "./routes/*": {
+      "types": "./dist/routes/*.d.ts",
+      "import": "./dist/routes/*.js"
+    },
+    "./middleware/*": {
+      "types": "./dist/middleware/*.d.ts",
+      "import": "./dist/middleware/*.js"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

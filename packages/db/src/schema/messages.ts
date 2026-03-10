@@ -1,6 +1,6 @@
 import { pgTable, uuid, varchar, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { sessions } from './sessions';
+import { sessions } from './sessions.js';
 
 /**
  * Messages table - stores full conversation history (NO summarization)

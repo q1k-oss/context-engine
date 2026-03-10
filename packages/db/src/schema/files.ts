@@ -1,6 +1,6 @@
 import { pgTable, uuid, varchar, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
-import { sessions } from './sessions';
+import { sessions } from './sessions.js';
 
 /**
  * Files table - stores uploaded file metadata and extracted content
