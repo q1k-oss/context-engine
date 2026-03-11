@@ -1,3 +1,4 @@
+import { encode } from '@q1k-oss/mint-format';
 import { claudeClientService } from '../llm/claude-client.service.js';
 import { domainExtractorService } from './domain-extractor.service.js';
 import {
@@ -35,9 +36,9 @@ export const entityExtractorService = {
     existingNodes: Array<{ name: string; type: string }>,
     conversationContext?: string
   ): Promise<WorkflowExtractionResult> {
-    // Build the extraction prompt with context
+    // Build the extraction prompt with context — MINT format for token efficiency
     const existingNodesList = existingNodes.length > 0
-      ? `\nEXISTING NODES IN GRAPH:\n${existingNodes.map(n => `- ${n.name} (${n.type})`).join('\n')}`
+      ? `\nEXISTING NODES IN GRAPH (MINT format):\n${encode({ nodes: existingNodes })}`
       : '\nNo existing nodes in graph yet.';
 
     const contextSection = conversationContext
@@ -429,7 +430,7 @@ Extract ONLY what is explicitly stated. Return JSON:`;
     existingNodes: Array<{ name: string; type: string }>
   ): Promise<UnifiedExtractionResult> {
     const existingNodesList = existingNodes.length > 0
-      ? `\nEXISTING NODES IN GRAPH:\n${existingNodes.map(n => `- ${n.name} (${n.type})`).join('\n')}`
+      ? `\nEXISTING NODES IN GRAPH (MINT format):\n${encode({ nodes: existingNodes })}`
       : '\nNo existing nodes in graph yet.';
 
     const fullPrompt = `${UnifiedExtractionPrompt}

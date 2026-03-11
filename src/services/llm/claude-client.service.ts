@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { encode } from '@q1k-oss/mint-format';
 import type { ClaudeContext, ClaudeMessage } from '../../types/index.js';
 import { getConfig } from '../../config.js';
 
@@ -14,46 +15,38 @@ function getClient(): Anthropic {
 }
 
 /**
- * Build the system prompt including knowledge graph context
+ * Build the system prompt including knowledge graph context.
+ * Uses MINT format for structured data to reduce token usage (~47% savings).
  */
 function buildSystemPrompt(context: ClaudeContext): string {
   let systemPrompt = context.systemPrompt || 'You are a helpful AI assistant.';
 
-  // Add knowledge graph context if available
-  if (context.relevantNodes.length > 0) {
+  const hasNodes = context.relevantNodes.length > 0;
+  const hasEdges = context.relevantEdges.length > 0;
+
+  if (hasNodes || hasEdges) {
     systemPrompt += '\n\n---\n## CAPTURED KNOWLEDGE (from conversation so far)\n';
+    systemPrompt += '(Data below is in MINT format — a compact table notation)\n';
 
-    // Group nodes by type for better organization
-    const nodesByType = new Map<string, typeof context.relevantNodes>();
-    for (const node of context.relevantNodes) {
-      const existing = nodesByType.get(node.type) || [];
-      existing.push(node);
-      nodesByType.set(node.type, existing);
+    if (hasNodes) {
+      const nodesData = context.relevantNodes.map((n) => ({
+        name: n.name,
+        type: n.type,
+        ...(n.description ? { description: n.description } : {}),
+      }));
+      systemPrompt += `\n${encode({ nodes: nodesData })}\n`;
     }
 
-    // Display grouped nodes
-    for (const [type, nodes] of nodesByType) {
-      systemPrompt += `\n### ${type}s:\n`;
-      for (const node of nodes) {
-        systemPrompt += `- **${node.name}**`;
-        if (node.description) {
-          systemPrompt += `: ${node.description}`;
-        }
-        systemPrompt += '\n';
-      }
+    if (hasEdges) {
+      const edgesData = context.relevantEdges.map((e) => ({
+        source: e.source,
+        relationship: e.relationship.replace(/_/g, ' ').toLowerCase(),
+        target: e.target,
+      }));
+      systemPrompt += `\n${encode({ relationships: edgesData })}\n`;
     }
-  }
 
-  if (context.relevantEdges.length > 0) {
-    systemPrompt += '\n### Relationships:\n';
-    for (const edge of context.relevantEdges) {
-      systemPrompt += `- ${edge.source} → ${edge.relationship.replace(/_/g, ' ').toLowerCase()} → ${edge.target}\n`;
-    }
-  }
-
-  // Add summary stats
-  if (context.relevantNodes.length > 0 || context.relevantEdges.length > 0) {
-    systemPrompt += `\n*Total: ${context.relevantNodes.length} nodes, ${context.relevantEdges.length} relationships captured*\n`;
+    systemPrompt += `\nstats: ${context.relevantNodes.length} nodes, ${context.relevantEdges.length} relationships captured\n`;
   } else {
     systemPrompt += '\n\n---\n## CAPTURED KNOWLEDGE\n*No knowledge captured yet. Start by understanding the user\'s requirements.*\n';
   }
@@ -134,11 +127,13 @@ export const claudeClientService = {
     concepts: Array<{ name: string; confidence: number; properties?: Record<string, unknown> }>;
     relationships: Array<{ source: string; target: string; type: string; confidence: number }>;
   }> {
-    const existingNodesList = existingNodes.map((n) => `${n.name} (${n.type})`).join(', ');
+    const existingContext = existingNodes.length > 0
+      ? `Existing entities in context (MINT format):\n${encode({ entities: existingNodes })}`
+      : 'Existing entities in context: None yet';
 
     const prompt = `Analyze this message and extract structured information.
 
-Existing entities in context: ${existingNodesList || 'None yet'}
+${existingContext}
 
 Message to analyze:
 "${content}"

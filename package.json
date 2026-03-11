@@ -82,6 +82,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.21.0",
+    "@q1k-oss/mint-format": "^1.0.2",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.38.3",
     "express": "^4.21.2",
