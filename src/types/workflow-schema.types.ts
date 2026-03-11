@@ -1,0 +1,274 @@
+export const WorkflowNodeTypes = {
+  GOAL: 'Goal',
+  TASK: 'Task',
+  DECISION: 'Decision',
+  CONSTRAINT: 'Constraint',
+  RESOURCE: 'Resource',
+  FACT: 'Fact',
+  STATE: 'State',
+} as const;
+
+export type WorkflowNodeType = (typeof WorkflowNodeTypes)[keyof typeof WorkflowNodeTypes];
+
+export const WorkflowEdgeTypes = {
+  ACHIEVES: 'ACHIEVES',
+  REQUIRES: 'REQUIRES',
+  BLOCKS: 'BLOCKS',
+  DECIDES: 'DECIDES',
+  USES: 'USES',
+  SUPPORTS: 'SUPPORTS',
+  PART_OF: 'PART_OF',
+  HAS_STATE: 'HAS_STATE',
+} as const;
+
+export type WorkflowEdgeType = (typeof WorkflowEdgeTypes)[keyof typeof WorkflowEdgeTypes];
+
+export const ValidRelationships: Record<WorkflowEdgeType, { from: WorkflowNodeType[]; to: WorkflowNodeType[] }> = {
+  ACHIEVES: { from: ['Task'], to: ['Goal'] },
+  REQUIRES: { from: ['Task', 'Goal'], to: ['Task', 'Resource', 'Decision'] },
+  BLOCKS: { from: ['Constraint'], to: ['Task', 'Goal'] },
+  DECIDES: { from: ['Decision'], to: ['Task', 'Goal'] },
+  USES: { from: ['Task'], to: ['Resource'] },
+  SUPPORTS: { from: ['Fact'], to: ['Decision', 'Task', 'Goal'] },
+  PART_OF: { from: ['Task', 'Goal'], to: ['Task', 'Goal'] },
+  HAS_STATE: { from: ['Task', 'Goal'], to: ['State'] },
+};
+
+export const ExtractionConfig = {
+  minConfidence: 0.7,
+  minRelationshipConfidence: 0.75,
+  requireExplicit: true,
+  maxEntitiesPerMessage: 5,
+  maxRelationshipsPerMessage: 5,
+} as const;
+
+export const ExtractionMarkers: Record<WorkflowNodeType, string[]> = {
+  Goal: ['i want to', 'i need to', 'goal is', 'objective is', 'trying to', 'aim to', 'purpose is', 'end goal', 'ultimate goal', 'want to achieve'],
+  Task: ['need to do', 'should do', 'must do', 'action item', 'step is', 'to-do', 'task is', 'work on', 'implement', 'create', 'build', 'fix', 'update'],
+  Decision: ['decided to', 'decision is', 'chose to', 'will use', 'going with', 'selected', 'picked', 'settled on', 'determined'],
+  Constraint: ['must not', 'cannot', 'limitation', 'constraint', 'requirement is', 'restricted to', 'only allowed', 'must be', 'should not', 'avoid'],
+  Resource: ['using', 'tool is', 'library', 'framework', 'database', 'api', 'service', 'system', 'platform', 'technology'],
+  Fact: ['fact is', 'know that', 'confirmed', 'verified', 'true that', 'found out', 'discovered', 'realized'],
+  State: ['currently', 'status is', 'state is', 'right now', 'at the moment', 'progress is', 'completed', 'pending', 'blocked', 'in progress'],
+};
+
+export const WorkflowExtractionPrompt = `You are a precise context extraction system for a workflow-based AI agent.
+
+TASK: Extract structured information from the conversation to build an accurate knowledge graph.
+
+RULES (STRICT):
+1. Only extract items that are EXPLICITLY stated - never infer or assume
+2. Each extraction must have confidence >= 0.7 to be included
+3. If uncertain, do NOT include the item
+4. Focus on actionable, workflow-relevant information
+5. Avoid generic or vague extractions
+
+NODE TYPES TO EXTRACT:
+- Goal: User's explicit objectives (e.g., "I want to build X", "My goal is Y")
+- Task: Specific action items (e.g., "I need to implement X", "Next step is Y")
+- Decision: Explicit choices made (e.g., "I've decided to use X", "Going with Y")
+- Constraint: Stated limitations (e.g., "Must not exceed X", "Cannot use Y")
+- Resource: Tools/systems mentioned for use (e.g., "Using PostgreSQL", "Will use React")
+- Fact: Verified information (e.g., "The API returns X", "Database has Y")
+- State: Current status (e.g., "Currently blocked on X", "Y is complete")
+
+EDGE TYPES (only use these):
+- ACHIEVES: Task -> Goal (task helps achieve goal)
+- REQUIRES: Task/Goal -> Task/Resource/Decision (prerequisite)
+- BLOCKS: Constraint -> Task/Goal (prevents progress)
+- DECIDES: Decision -> Task/Goal (determines direction)
+- USES: Task -> Resource (task uses a resource)
+- SUPPORTS: Fact -> Decision/Task/Goal (evidence)
+- PART_OF: Task/Goal -> Task/Goal (decomposition)
+- HAS_STATE: Task/Goal -> State (current status)
+
+OUTPUT FORMAT (JSON only):
+{
+  "nodes": [
+    {
+      "name": "exact name from conversation",
+      "type": "Goal|Task|Decision|Constraint|Resource|Fact|State",
+      "confidence": 0.0-1.0,
+      "source": "quote from message that supports this extraction"
+    }
+  ],
+  "edges": [
+    {
+      "from": "source node name",
+      "to": "target node name",
+      "type": "ACHIEVES|REQUIRES|BLOCKS|DECIDES|USES|SUPPORTS|PART_OF|HAS_STATE",
+      "confidence": 0.0-1.0,
+      "source": "quote that shows this relationship"
+    }
+  ]
+}
+
+IMPORTANT:
+- Include "source" field with exact quote from the message
+- If no confident extractions, return {"nodes": [], "edges": []}
+- Quality over quantity - fewer accurate extractions is better`;
+
+export interface ExtractedNode {
+  name: string;
+  type: WorkflowNodeType;
+  confidence: number;
+  source: string;
+  properties?: Record<string, unknown>;
+}
+
+export interface ExtractedEdge {
+  from: string;
+  to: string;
+  type: WorkflowEdgeType;
+  confidence: number;
+  source: string;
+}
+
+export interface WorkflowExtractionResult {
+  nodes: ExtractedNode[];
+  edges: ExtractedEdge[];
+  messageId?: string;
+  timestamp?: Date;
+}
+
+export function isValidNodeType(type: string): type is WorkflowNodeType {
+  return Object.values(WorkflowNodeTypes).includes(type as WorkflowNodeType);
+}
+
+export function isValidEdgeType(type: string): type is WorkflowEdgeType {
+  return Object.values(WorkflowEdgeTypes).includes(type as WorkflowEdgeType);
+}
+
+export function isValidRelationship(
+  edgeType: WorkflowEdgeType,
+  fromType: WorkflowNodeType,
+  toType: WorkflowNodeType
+): boolean {
+  const valid = ValidRelationships[edgeType];
+  if (!valid) return false;
+  return valid.from.includes(fromType) && valid.to.includes(toType);
+}
+
+export function meetsConfidenceThreshold(confidence: number, isEdge: boolean = false): boolean {
+  const threshold = isEdge
+    ? ExtractionConfig.minRelationshipConfidence
+    : ExtractionConfig.minConfidence;
+  return confidence >= threshold;
+}
+
+export interface EntityAlias {
+  canonicalName: string;
+  aliases: string[];
+}
+
+export type ContradictionChangeType = 'supersedes' | 'refines' | 'contradicts';
+
+export interface Contradiction {
+  subject: string;
+  previousValue: string;
+  newValue: string;
+  changeType: ContradictionChangeType;
+  evidence: string;
+}
+
+export interface ReasoningLink {
+  decisionName: string;
+  evidenceList: string[];
+  rationale: string;
+}
+
+export interface CoOccurrence {
+  entity1: string;
+  entity2: string;
+  contextSentence: string;
+}
+
+export interface UnifiedExtractionResult {
+  nodes: ExtractedNode[];
+  edges: Array<ExtractedEdge & { description: string }>;
+  entityAliases: EntityAlias[];
+  coOccurrences: CoOccurrence[];
+  contradictions: Contradiction[];
+  reasoningLinks: ReasoningLink[];
+}
+
+export const UnifiedExtractionPrompt = `You are a precise knowledge graph extraction system. You will receive a USER message and an ASSISTANT message from a conversation turn. Extract structured information using a three-thought framework.
+
+THOUGHT 1 - IDENTIFY ENTITIES & ALIASES:
+- Identify key terms, concepts, decisions, goals, tasks, resources, constraints, facts, and states
+- For each entity, determine if it is an alias of an existing node (check EXISTING NODES list)
+- Output canonical names and any aliases
+
+THOUGHT 2 - DETERMINE RELATIONSHIPS & CO-OCCURRENCES:
+- Determine how entities relate using these edge types: ACHIEVES, REQUIRES, BLOCKS, DECIDES, USES, SUPPORTS, PART_OF, HAS_STATE, CO_OCCURS, SUPERSEDES, EVIDENCE_FOR
+- For each relationship, provide a full natural-language description (not truncated)
+- Track co-occurrences: entities mentioned together in the same sentence/context
+
+THOUGHT 3 - DETECT CONTRADICTIONS & REASONING:
+- Detect when a new statement contradicts or supersedes a previous one
+- Link decisions to their supporting evidence/facts
+- Classify changes as: supersedes (replaces), refines (narrows/adjusts), contradicts (conflicts)
+
+RULES:
+1. Only extract items EXPLICITLY stated - never infer
+2. Confidence >= 0.7 required
+3. User messages contain intents/goals; Assistant messages contain decisions/recommendations
+4. Quality over quantity
+
+NODE TYPES: Goal, Task, Decision, Constraint, Resource, Fact, State
+
+OUTPUT FORMAT (JSON only):
+{
+  "nodes": [
+    {
+      "name": "exact name",
+      "type": "Goal|Task|Decision|Constraint|Resource|Fact|State",
+      "confidence": 0.0-1.0,
+      "source": "quote from message"
+    }
+  ],
+  "edges": [
+    {
+      "from": "source node name",
+      "to": "target node name",
+      "type": "ACHIEVES|REQUIRES|BLOCKS|DECIDES|USES|SUPPORTS|PART_OF|HAS_STATE|CO_OCCURS|SUPERSEDES|EVIDENCE_FOR",
+      "confidence": 0.0-1.0,
+      "source": "quote showing relationship",
+      "description": "full natural-language description of this relationship"
+    }
+  ],
+  "entityAliases": [
+    {
+      "canonicalName": "primary name",
+      "aliases": ["alt name 1", "alt name 2"]
+    }
+  ],
+  "coOccurrences": [
+    {
+      "entity1": "name1",
+      "entity2": "name2",
+      "contextSentence": "sentence where both appear"
+    }
+  ],
+  "contradictions": [
+    {
+      "subject": "entity name",
+      "previousValue": "what was stated before",
+      "newValue": "what is stated now",
+      "changeType": "supersedes|refines|contradicts",
+      "evidence": "quote showing the change"
+    }
+  ],
+  "reasoningLinks": [
+    {
+      "decisionName": "decision entity name",
+      "evidenceList": ["fact1", "fact2"],
+      "rationale": "why this decision was made based on the evidence"
+    }
+  ]
+}
+
+IMPORTANT:
+- Return empty arrays for sections with no confident extractions
+- Include "description" on every edge - this is the full relationship context, NOT truncated
+- Mark user-originated items (goals, tasks, constraints) separately from assistant-originated items (decisions, recommendations)`;
