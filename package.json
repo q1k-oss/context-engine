@@ -1,9 +1,26 @@
 {
-  "name": "@context-engine/core",
-  "version": "0.1.0",
+  "name": "@q1k-oss/context-engine",
+  "version": "0.1.1",
   "description": "AI-powered knowledge graph engine that extracts and structures domain knowledge from conversations",
   "type": "module",
   "license": "MIT",
+  "keywords": [
+    "knowledge-graph",
+    "ai",
+    "llm",
+    "claude",
+    "gemini",
+    "context",
+    "domain-extraction",
+    "entity-extraction",
+    "graph-database",
+    "conversational-ai",
+    "express",
+    "drizzle",
+    "postgresql",
+    "sdk",
+    "nlp"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
