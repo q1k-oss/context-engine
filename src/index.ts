@@ -35,5 +35,9 @@ export { priorityCalculatorService } from './services/knowledge-graph/priority-c
 export { domainExtractorService } from './services/knowledge-graph/domain-extractor.service.js';
 export { ageClientService } from './services/graph/age-client.service.js';
 
+// Tools
+export { contextEngineTools, nodeTools, edgeTools, graphTools, aliasTools } from './tools/index.js';
+export type { ToolDefinition } from './tools/index.js';
+
 // Types (re-export everything from types, which is the canonical source)
 export * from './types/index.js';
