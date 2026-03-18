@@ -24,7 +24,7 @@ export const geminiClientService = {
    */
   async extractFromFile(request: GeminiExtractionRequest): Promise<GeminiExtractionResponse> {
     try {
-      const model = getClient().getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+      const model = getClient().getGenerativeModel({ model: getConfig().geminiModel || 'gemini-2.0-flash-exp' });
 
       // Build extraction prompt - emphasize NO reasoning
       const extractionPrompt = `You are a content extraction tool. Your ONLY job is to extract information from this document.

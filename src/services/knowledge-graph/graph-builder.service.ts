@@ -1,6 +1,6 @@
 import { getDb } from '../../db/index.js';
 import { knowledgeNodes, knowledgeEdges, contextDeltas, graphVersions, messages, nodeAliases } from '../../db/schema/index.js';
-import { eq, and, desc, gte } from 'drizzle-orm';
+import { eq, and, desc, gte, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import type {
   Message,
@@ -413,17 +413,20 @@ export const graphBuilderService = {
 
     const nodeIds = nodes.map((n) => n.id);
 
-    const edges = await getDb().query.knowledgeEdges.findMany({
-      where: and(
-        eq(knowledgeEdges.sessionId, sessionId),
-        eq(knowledgeEdges.isDeleted, false)
-      ),
-    });
-
-    // Filter edges to only those connecting prioritized nodes
-    const relevantEdges = edges.filter(
-      (e) => nodeIds.includes(e.sourceNodeId) && nodeIds.includes(e.targetNodeId)
-    );
+    // Only load edges connecting prioritized nodes (not all session edges)
+    const relevantEdges = nodeIds.length > 0
+      ? await getDb()
+          .select()
+          .from(knowledgeEdges)
+          .where(
+            and(
+              eq(knowledgeEdges.sessionId, sessionId),
+              eq(knowledgeEdges.isDeleted, false),
+              inArray(knowledgeEdges.sourceNodeId, nodeIds),
+              inArray(knowledgeEdges.targetNodeId, nodeIds),
+            )
+          )
+      : [];
 
     return {
       nodes: nodes.map((n) => ({

@@ -1,8 +1,16 @@
 import { z } from 'zod';
 import { eq, and, or, desc } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
-import { knowledgeEdges, knowledgeNodes } from '../db/schema/index.js';
-import type { ToolDefinition } from './index.js';
+import { knowledgeEdges, knowledgeNodes, sessions } from '../db/schema/index.js';
+import type { ToolDefinition, ToolContext } from './index.js';
+
+async function verifySessionTenant(sessionId: string, context?: ToolContext): Promise<void> {
+  if (!context?.tenantId) return;
+  const session = await getDb().query.sessions.findFirst({
+    where: and(eq(sessions.id, sessionId), eq(sessions.tenantId, context.tenantId)),
+  });
+  if (!session) throw new Error(`Session ${sessionId} not found or not accessible`);
+}
 
 const EdgeTypes = [
   'RELATES_TO', 'CAUSES', 'DEPENDS_ON', 'DECIDED_BY', 'CONSTRAINED_BY',
@@ -21,7 +29,8 @@ export const edgeTools: ToolDefinition[] = [
       edgeData: z.record(z.unknown()).optional().describe('Arbitrary structured data for the edge'),
       weight: z.string().optional().describe('Edge weight 0.00-1.00 (default: 1.00)'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       const [edge] = await getDb()
         .insert(knowledgeEdges)
         .values({
@@ -42,7 +51,7 @@ export const edgeTools: ToolDefinition[] = [
     parameters: z.object({
       edgeId: z.string().uuid().describe('Edge ID to retrieve'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
       const edges = await getDb()
         .select({
           edge: knowledgeEdges,
@@ -56,6 +65,7 @@ export const edgeTools: ToolDefinition[] = [
       if (edges.length === 0) throw new Error(`Edge ${input.edgeId} not found`);
 
       const row = edges[0]!;
+      await verifySessionTenant(row.edge.sessionId, context);
 
       const targetNode = await getDb()
         .select({ name: knowledgeNodes.name, nodeType: knowledgeNodes.nodeType })
@@ -75,13 +85,14 @@ export const edgeTools: ToolDefinition[] = [
     parameters: z.object({
       edgeId: z.string().uuid().describe('Edge ID to delete'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
       const [edge] = await getDb()
         .update(knowledgeEdges)
         .set({ isDeleted: true })
         .where(and(eq(knowledgeEdges.id, input.edgeId as string), eq(knowledgeEdges.isDeleted, false)))
         .returning();
       if (!edge) throw new Error(`Edge ${input.edgeId} not found`);
+      await verifySessionTenant(edge.sessionId, context);
       return edge;
     },
   },
@@ -95,7 +106,8 @@ export const edgeTools: ToolDefinition[] = [
       limit: z.number().int().min(1).max(200).optional().describe('Max results (default: 50)'),
       offset: z.number().int().min(0).optional().describe('Pagination offset (default: 0)'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       const conditions = [
         eq(knowledgeEdges.sessionId, input.sessionId as string),
         eq(knowledgeEdges.isDeleted, false),

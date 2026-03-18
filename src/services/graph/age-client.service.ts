@@ -11,6 +11,28 @@ function getSql(): ReturnType<typeof postgres> {
 }
 
 /**
+ * Validate a graph name to prevent SQL injection.
+ * Graph names must be alphanumeric + underscores only.
+ */
+function validateGraphName(name: string): string {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    throw new Error(`Invalid graph name: ${name}. Only alphanumeric characters and underscores are allowed.`);
+  }
+  return name;
+}
+
+/**
+ * Validate a Cypher query string to prevent injection of PostgreSQL escape sequences.
+ * Block $$ which could break out of the Cypher dollar-quoted string.
+ */
+function validateCypher(cypher: string): string {
+  if (cypher.includes('$$')) {
+    throw new Error('Cypher query contains invalid escape sequence ($$)');
+  }
+  return cypher;
+}
+
+/**
  * Apache AGE Client Service
  * Provides Cypher query capabilities for the knowledge graph
  */
@@ -35,9 +57,12 @@ export const ageClientService = {
   ): Promise<T[]> {
     await this.initSession();
 
+    const safeGraphName = validateGraphName(graphName);
+    const safeCypher = validateCypher(cypher);
+
     const result = await getSql().unsafe(`
-      SELECT * FROM cypher('${graphName}', $$
-        ${cypher}
+      SELECT * FROM cypher('${safeGraphName}', $$
+        ${safeCypher}
       $$) as (result agtype);
     `);
 

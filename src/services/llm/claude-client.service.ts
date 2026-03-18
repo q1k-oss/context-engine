@@ -75,7 +75,7 @@ export const claudeClientService = {
     }));
 
     const stream = await getClient().messages.stream({
-      model: 'claude-sonnet-4-20250514',
+      model: getConfig().claudeModel || 'claude-sonnet-4-20250514',
       max_tokens: 8192,
       system: systemPrompt,
       messages,
@@ -105,7 +105,7 @@ export const claudeClientService = {
     }));
 
     const response = await getClient().messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getConfig().claudeModel || 'claude-sonnet-4-20250514',
       max_tokens: 8192,
       system: systemPrompt,
       messages,
@@ -153,7 +153,7 @@ Return ONLY valid JSON in this exact format:
 Be conservative - only extract entities/concepts with confidence > 0.5. Focus on concrete, actionable information.`;
 
     const response = await getClient().messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getConfig().claudeModel || 'claude-sonnet-4-20250514',
       max_tokens: 2048,
       messages: [{ role: 'user', content: prompt }],
     });
@@ -167,10 +167,13 @@ Be conservative - only extract entities/concepts with confidence > 0.5. Focus on
       if (jsonMatch) {
         return JSON.parse(jsonMatch[0]);
       }
+      console.error('No JSON found in graph extraction response');
     } catch (e) {
       console.error('Failed to parse graph extraction response:', e);
     }
 
+    // Return empty result — caller should treat zero results as "nothing extracted"
+    // rather than "extraction failed". Throwing here would break the graph build pipeline.
     return { entities: [], concepts: [], relationships: [] };
   },
 
@@ -180,7 +183,7 @@ Be conservative - only extract entities/concepts with confidence > 0.5. Focus on
   async generateChatTitle(userMessage: string, assistantResponse: string): Promise<string> {
     try {
       const response = await getClient().messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: getConfig().claudeModel || 'claude-sonnet-4-20250514',
         max_tokens: 50,
         messages: [
           {

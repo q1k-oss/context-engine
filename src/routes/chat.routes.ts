@@ -5,9 +5,19 @@ import { AppError } from '../middleware/error-handler.js';
 
 export const chatRouter: RouterType = Router();
 
+const uuidSchema = z.string().uuid();
+function validateUuid(value: string, name: string): string {
+  const result = uuidSchema.safeParse(value);
+  if (!result.success) {
+    throw new AppError('INVALID_PARAM', `${name} must be a valid UUID`, 400);
+  }
+  return result.data;
+}
+
 // Validation schemas
 const createSessionSchema = z.object({
   title: z.string().optional(),
+  tenantId: z.string().optional(),
 });
 
 const sendMessageSchema = z.object({
@@ -21,7 +31,8 @@ const sendMessageSchema = z.object({
  */
 chatRouter.get('/sessions', async (req, res, next) => {
   try {
-    const sessions = await chatOrchestratorService.listSessions();
+    const tenantId = req.query.tenantId as string | undefined;
+    const sessions = await chatOrchestratorService.listSessions(tenantId);
     res.json({ success: true, data: { sessions } });
   } catch (error) {
     next(error);
@@ -35,7 +46,7 @@ chatRouter.get('/sessions', async (req, res, next) => {
 chatRouter.post('/sessions', async (req, res, next) => {
   try {
     const body = createSessionSchema.parse(req.body);
-    const session = await chatOrchestratorService.createSession(body.title);
+    const session = await chatOrchestratorService.createSession(body.title, body.tenantId);
     res.status(201).json({ success: true, data: { session } });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -52,7 +63,8 @@ chatRouter.post('/sessions', async (req, res, next) => {
  */
 chatRouter.get('/sessions/:id', async (req, res, next) => {
   try {
-    const session = await chatOrchestratorService.getSession(req.params.id!);
+    const id = validateUuid(req.params.id!, 'id');
+    const session = await chatOrchestratorService.getSession(id);
     res.json({ success: true, data: { session } });
   } catch (error) {
     next(error);
@@ -65,7 +77,8 @@ chatRouter.get('/sessions/:id', async (req, res, next) => {
  */
 chatRouter.delete('/sessions/:id', async (req, res, next) => {
   try {
-    await chatOrchestratorService.deleteSession(req.params.id!);
+    const id = validateUuid(req.params.id!, 'id');
+    await chatOrchestratorService.deleteSession(id);
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -79,7 +92,7 @@ chatRouter.delete('/sessions/:id', async (req, res, next) => {
 chatRouter.post('/sessions/:id/messages', async (req, res, next) => {
   try {
     const body = sendMessageSchema.parse(req.body);
-    const sessionId = req.params.id!;
+    const sessionId = validateUuid(req.params.id!, 'id');
 
     // Set up SSE
     res.setHeader('Content-Type', 'text/event-stream');

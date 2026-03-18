@@ -16,6 +16,10 @@ initContextEngine({
   googleAiApiKey: process.env.GOOGLE_AI_API_KEY,
   ageEnabled: process.env.AGE_ENABLED !== 'false',
   uploadDir: process.env.UPLOAD_DIR || './uploads',
+  claudeModel: process.env.CLAUDE_MODEL,
+  geminiModel: process.env.GEMINI_MODEL,
+  dbPoolSize: process.env.DB_POOL_SIZE ? parseInt(process.env.DB_POOL_SIZE, 10) : undefined,
+  dbIdleTimeout: process.env.DB_IDLE_TIMEOUT ? parseInt(process.env.DB_IDLE_TIMEOUT, 10) : undefined,
 });
 
 const app = createApp({

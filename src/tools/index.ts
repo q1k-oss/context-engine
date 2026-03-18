@@ -4,6 +4,21 @@ import { edgeTools } from './edge-tools.js';
 import { graphTools } from './graph-tools.js';
 import { aliasTools } from './alias-tools.js';
 
+/**
+ * Context passed to tool execution from the hosting platform.
+ * When integrated into a controlplane, this carries tenant/conversation scoping.
+ */
+export interface ToolContext {
+  /** Tenant ID for multi-tenant isolation */
+  tenantId?: string;
+  /** Conversation ID for session binding */
+  conversationId?: string;
+  /** Agent ID if executed by a specific agent */
+  agentId?: string;
+  /** Arbitrary additional context from the host platform */
+  [key: string]: unknown;
+}
+
 export interface ToolDefinition {
   /** Tool name (e.g. 'create_node') */
   name: string;
@@ -13,8 +28,8 @@ export interface ToolDefinition {
   promptDescription?: string;
   /** Zod schema defining the tool's input parameters */
   parameters: z.ZodObject<any>;
-  /** Execute the tool with validated input */
-  execute: (input: Record<string, unknown>) => Promise<unknown>;
+  /** Execute the tool with validated input and optional platform context */
+  execute: (input: Record<string, unknown>, context?: ToolContext) => Promise<unknown>;
 }
 
 /**

@@ -6,7 +6,7 @@ import { graphRouter } from './routes/graph.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 export interface CreateAppOptions {
-  /** CORS origin (default: '*') */
+  /** CORS origin (default: 'http://localhost:3000') */
   corsOrigin?: string | string[];
 }
 
@@ -19,7 +19,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   // Middleware
   app.use(cors({
-    origin: options.corsOrigin || '*',
+    origin: options.corsOrigin || 'http://localhost:3000',
     credentials: true,
   }));
   app.use(express.json());

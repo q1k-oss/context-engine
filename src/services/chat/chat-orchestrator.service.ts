@@ -1,6 +1,6 @@
 import { getDb } from '../../db/index.js';
 import { sessions, messages } from '../../db/schema/index.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import type { Session, Message, ClaudeContext, ClaudeMessage } from '../../types/index.js';
 import { claudeClientService } from '../llm/claude-client.service.js';
@@ -58,11 +58,12 @@ export const chatOrchestratorService = {
   /**
    * Create a new chat session
    */
-  async createSession(title?: string): Promise<Session> {
+  async createSession(title?: string, tenantId?: string): Promise<Session> {
     const [session] = await getDb()
       .insert(sessions)
       .values({
         id: uuidv4(),
+        tenantId: tenantId || null,
         title: title || 'New Conversation',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -98,8 +99,10 @@ export const chatOrchestratorService = {
   /**
    * Get all sessions
    */
-  async listSessions() {
+  async listSessions(tenantId?: string) {
+    const conditions = tenantId ? [eq(sessions.tenantId, tenantId)] : [];
     const allSessions = await getDb().query.sessions.findMany({
+      where: conditions.length > 0 ? and(...conditions) : undefined,
       orderBy: [desc(sessions.updatedAt)],
     });
     return allSessions;
@@ -131,11 +134,16 @@ export const chatOrchestratorService = {
       return;
     }
 
-    // Get FULL message history - NO summarization
+    // Get message history with a cap to prevent OOM on very long sessions.
+    // Load the most recent messages (up to MAX_HISTORY_MESSAGES) to stay within memory limits.
+    const MAX_HISTORY_MESSAGES = 200;
     const history = await getDb().query.messages.findMany({
       where: eq(messages.sessionId, sessionId),
-      orderBy: [messages.sequenceNumber],
+      orderBy: [desc(messages.sequenceNumber)],
+      limit: MAX_HISTORY_MESSAGES,
     });
+    // Reverse to chronological order for Claude
+    history.reverse();
 
     const nextSequence = history.length > 0 ? Math.max(...history.map((m) => m.sequenceNumber)) + 1 : 1;
 
@@ -228,6 +236,8 @@ export const chatOrchestratorService = {
       // Generate title async - don't block the response
       claudeClientService.generateChatTitle(content, fullResponse).then(async (title) => {
         await getDb().update(sessions).set({ title }).where(eq(sessions.id, sessionId));
+      }).catch((err) => {
+        console.error('Failed to generate session title:', err);
       });
     }
 

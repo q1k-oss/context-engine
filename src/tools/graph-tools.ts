@@ -1,9 +1,17 @@
 import { z } from 'zod';
 import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
-import { contextDeltas, graphVersions } from '../db/schema/index.js';
+import { contextDeltas, graphVersions, sessions } from '../db/schema/index.js';
 import { graphBuilderService } from '../services/knowledge-graph/graph-builder.service.js';
-import type { ToolDefinition } from './index.js';
+import type { ToolDefinition, ToolContext } from './index.js';
+
+async function verifySessionTenant(sessionId: string, context?: ToolContext): Promise<void> {
+  if (!context?.tenantId) return;
+  const session = await getDb().query.sessions.findFirst({
+    where: and(eq(sessions.id, sessionId), eq(sessions.tenantId, context.tenantId)),
+  });
+  if (!session) throw new Error(`Session ${sessionId} not found or not accessible`);
+}
 
 export const graphTools: ToolDefinition[] = [
   {
@@ -12,7 +20,8 @@ export const graphTools: ToolDefinition[] = [
     parameters: z.object({
       sessionId: z.string().uuid().describe('Session ID'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       return graphBuilderService.getGraph(input.sessionId as string);
     },
   },
@@ -23,7 +32,8 @@ export const graphTools: ToolDefinition[] = [
       sessionId: z.string().uuid().describe('Session ID'),
       minPriority: z.number().min(0).max(1).optional().describe('Minimum priority threshold (default: 0.3)'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       return graphBuilderService.getPrioritizedContext(
         input.sessionId as string,
         input.minPriority as number | undefined,
@@ -37,7 +47,8 @@ export const graphTools: ToolDefinition[] = [
       sessionId: z.string().uuid().describe('Session ID'),
       version: z.number().int().min(0).describe('Version number to retrieve'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       const snapshot = await getDb().query.graphVersions.findFirst({
         where: and(
           eq(graphVersions.sessionId, input.sessionId as string),
@@ -54,7 +65,8 @@ export const graphTools: ToolDefinition[] = [
     parameters: z.object({
       sessionId: z.string().uuid().describe('Session ID'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       const versions = await getDb()
         .select()
         .from(graphVersions)
@@ -80,7 +92,8 @@ export const graphTools: ToolDefinition[] = [
     parameters: z.object({
       sessionId: z.string().uuid().describe('Session ID'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       const deltas = await getDb().query.contextDeltas.findMany({
         where: eq(contextDeltas.sessionId, input.sessionId as string),
         orderBy: [desc(contextDeltas.versionTo)],
@@ -112,7 +125,8 @@ export const graphTools: ToolDefinition[] = [
     parameters: z.object({
       sessionId: z.string().uuid().describe('Session ID'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       return graphBuilderService.repairOrphans(input.sessionId as string);
     },
   },

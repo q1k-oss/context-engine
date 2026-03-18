@@ -55,9 +55,15 @@ export const fileProcessorService = {
       })
       .returning();
 
-    // Start async processing
+    // Start async processing — errors are recorded in the DB (processingStatus = 'failed')
     this.processFile(fileId).catch((err) => {
       console.error(`File processing failed for ${fileId}:`, err);
+      // Ensure status is set to failed even if processFile's own catch didn't fire
+      getDb()
+        .update(files)
+        .set({ processingStatus: 'failed', processingError: err instanceof Error ? err.message : 'Unknown error' })
+        .where(eq(files.id, fileId))
+        .catch(() => {}); // Last-resort: don't let DB error propagate
     });
 
     return fileRecord as FileMetadata;

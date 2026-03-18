@@ -1,4 +1,5 @@
 import { Router, type Router as RouterType } from 'express';
+import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { knowledgeNodes, knowledgeEdges, contextDeltas, graphVersions } from '../db/schema/index.js';
 import { eq, desc } from 'drizzle-orm';
@@ -8,13 +9,25 @@ import { AppError } from '../middleware/error-handler.js';
 
 export const graphRouter: RouterType = Router();
 
+/** Validate UUID format */
+const uuidSchema = z.string().uuid();
+
+function validateUuid(value: string, name: string): string {
+  const result = uuidSchema.safeParse(value);
+  if (!result.success) {
+    throw new AppError('INVALID_PARAM', `${name} must be a valid UUID`, 400);
+  }
+  return result.data;
+}
+
 /**
  * GET /api/graph/:sessionId
  * Get the current knowledge graph for a session
  */
 graphRouter.get('/:sessionId', async (req, res, next) => {
   try {
-    const graph = await graphBuilderService.getGraph(req.params.sessionId!);
+    const sessionId = validateUuid(req.params.sessionId!, 'sessionId');
+    const graph = await graphBuilderService.getGraph(sessionId);
 
     res.json({
       success: true,
@@ -31,8 +44,9 @@ graphRouter.get('/:sessionId', async (req, res, next) => {
  */
 graphRouter.get('/:sessionId/versions', async (req, res, next) => {
   try {
+    const sessionId = validateUuid(req.params.sessionId!, 'sessionId');
     const versions = await getDb().query.graphVersions.findMany({
-      where: eq(graphVersions.sessionId, req.params.sessionId!),
+      where: eq(graphVersions.sessionId, sessionId),
       orderBy: [desc(graphVersions.version)],
     });
 
@@ -61,6 +75,7 @@ graphRouter.get('/:sessionId/versions', async (req, res, next) => {
  */
 graphRouter.get('/:sessionId/versions/:version', async (req, res, next) => {
   try {
+    const sessionId = validateUuid(req.params.sessionId!, 'sessionId');
     const versionNum = parseInt(req.params.version!, 10);
 
     if (isNaN(versionNum)) {
@@ -68,7 +83,7 @@ graphRouter.get('/:sessionId/versions/:version', async (req, res, next) => {
     }
 
     const version = await getDb().query.graphVersions.findFirst({
-      where: eq(graphVersions.sessionId, req.params.sessionId!),
+      where: eq(graphVersions.sessionId, sessionId),
       orderBy: [desc(graphVersions.version)],
     });
 
@@ -104,8 +119,9 @@ graphRouter.get('/:sessionId/versions/:version', async (req, res, next) => {
  */
 graphRouter.get('/:sessionId/deltas', async (req, res, next) => {
   try {
+    const sessionId = validateUuid(req.params.sessionId!, 'sessionId');
     const deltas = await getDb().query.contextDeltas.findMany({
-      where: eq(contextDeltas.sessionId, req.params.sessionId!),
+      where: eq(contextDeltas.sessionId, sessionId),
       orderBy: [desc(contextDeltas.versionTo)],
     });
 
@@ -152,8 +168,10 @@ graphRouter.get('/:sessionId/deltas', async (req, res, next) => {
  */
 graphRouter.get('/:sessionId/deltas/:deltaId', async (req, res, next) => {
   try {
+    validateUuid(req.params.sessionId!, 'sessionId');
+    const deltaId = validateUuid(req.params.deltaId!, 'deltaId');
     const delta = await getDb().query.contextDeltas.findFirst({
-      where: eq(contextDeltas.id, req.params.deltaId!),
+      where: eq(contextDeltas.id, deltaId),
     });
 
     if (!delta) {
@@ -175,12 +193,17 @@ graphRouter.get('/:sessionId/deltas/:deltaId', async (req, res, next) => {
  */
 graphRouter.get('/:sessionId/context', async (req, res, next) => {
   try {
-    const minPriority = req.query.minPriority
-      ? parseFloat(req.query.minPriority as string)
-      : undefined;
+    const sessionId = validateUuid(req.params.sessionId!, 'sessionId');
+    let minPriority: number | undefined;
+    if (req.query.minPriority) {
+      minPriority = parseFloat(req.query.minPriority as string);
+      if (isNaN(minPriority) || minPriority < 0 || minPriority > 1) {
+        throw new AppError('INVALID_PARAM', 'minPriority must be a number between 0 and 1', 400);
+      }
+    }
 
     const context = await graphBuilderService.getPrioritizedContext(
-      req.params.sessionId!,
+      sessionId,
       minPriority
     );
 
@@ -203,7 +226,8 @@ graphRouter.get('/:sessionId/context', async (req, res, next) => {
  */
 graphRouter.get('/:sessionId/age', async (req, res, next) => {
   try {
-    const graph = await graphBuilderService.getGraphFromAGE(req.params.sessionId!);
+    const sessionId = validateUuid(req.params.sessionId!, 'sessionId');
+    const graph = await graphBuilderService.getGraphFromAGE(sessionId);
     res.json({
       success: true,
       data: { graph },
@@ -264,8 +288,10 @@ graphRouter.get('/:sessionId/paths', async (req, res, next) => {
  */
 graphRouter.get('/:sessionId/neighbors/:nodeId', async (req, res, next) => {
   try {
+    validateUuid(req.params.sessionId!, 'sessionId');
+    const nodeId = validateUuid(req.params.nodeId!, 'nodeId');
     const direction = (req.query.direction as 'in' | 'out' | 'both') || 'both';
-    const neighbors = await graphBuilderService.getNodeNeighbors(req.params.nodeId!, direction);
+    const neighbors = await graphBuilderService.getNodeNeighbors(nodeId, direction);
     res.json({
       success: true,
       data: { neighbors },
@@ -287,10 +313,21 @@ graphRouter.post('/:sessionId/cypher', async (req, res, next) => {
       throw new AppError('INVALID_QUERY', 'A valid Cypher query string is required', 400);
     }
 
-    // Basic safety check - prevent destructive operations
-    const lowerQuery = query.toLowerCase();
-    if (lowerQuery.includes('delete') || lowerQuery.includes('drop') || lowerQuery.includes('remove')) {
-      throw new AppError('FORBIDDEN_QUERY', 'Destructive queries are not allowed via this endpoint', 403);
+    // Length limit to prevent abuse
+    if (query.length > 5000) {
+      throw new AppError('QUERY_TOO_LONG', 'Cypher query must be under 5000 characters', 400);
+    }
+
+    // Safety check - prevent destructive operations.
+    // Use word-boundary matching to avoid false positives on substrings.
+    const destructivePattern = /\b(delete|drop|remove|detach|create|set|merge)\b/i;
+    if (destructivePattern.test(query)) {
+      throw new AppError('FORBIDDEN_QUERY', 'Only read-only Cypher queries (MATCH/RETURN) are allowed via this endpoint', 403);
+    }
+
+    // Must start with MATCH (read-only queries)
+    if (!/^\s*match\b/i.test(query)) {
+      throw new AppError('FORBIDDEN_QUERY', 'Cypher queries must start with MATCH', 403);
     }
 
     const result = await graphBuilderService.executeCypher(query);
@@ -309,7 +346,8 @@ graphRouter.post('/:sessionId/cypher', async (req, res, next) => {
  */
 graphRouter.post('/:sessionId/repair-orphans', async (req, res, next) => {
   try {
-    const result = await graphBuilderService.repairOrphans(req.params.sessionId!);
+    const sessionId = validateUuid(req.params.sessionId!, 'sessionId');
+    const result = await graphBuilderService.repairOrphans(sessionId);
     res.json({
       success: true,
       data: result,

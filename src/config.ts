@@ -15,6 +15,14 @@ export interface ContextEngineConfig {
   ageEnabled?: boolean;
   /** Directory for file uploads (default: './uploads') */
   uploadDir?: string;
+  /** Claude model for reasoning/extraction (default: 'claude-sonnet-4-20250514') */
+  claudeModel?: string;
+  /** Gemini model for file extraction (default: 'gemini-2.0-flash-exp') */
+  geminiModel?: string;
+  /** PostgreSQL connection pool size (default: 10) */
+  dbPoolSize?: number;
+  /** PostgreSQL connection idle timeout in seconds (default: 30) */
+  dbIdleTimeout?: number;
 }
 
 let _config: ContextEngineConfig | null = null;

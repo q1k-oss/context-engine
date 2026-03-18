@@ -1,8 +1,16 @@
 import { z } from 'zod';
 import { eq, and, ilike } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
-import { nodeAliases } from '../db/schema/index.js';
-import type { ToolDefinition } from './index.js';
+import { nodeAliases, sessions } from '../db/schema/index.js';
+import type { ToolDefinition, ToolContext } from './index.js';
+
+async function verifySessionTenant(sessionId: string, context?: ToolContext): Promise<void> {
+  if (!context?.tenantId) return;
+  const session = await getDb().query.sessions.findFirst({
+    where: and(eq(sessions.id, sessionId), eq(sessions.tenantId, context.tenantId)),
+  });
+  if (!session) throw new Error(`Session ${sessionId} not found or not accessible`);
+}
 
 export const aliasTools: ToolDefinition[] = [
   {
@@ -13,7 +21,8 @@ export const aliasTools: ToolDefinition[] = [
       nodeId: z.string().uuid().describe('Node ID to add alias to'),
       alias: z.string().min(1).describe('Alternative name for the node'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       const [alias] = await getDb()
         .insert(nodeAliases)
         .values({
@@ -34,7 +43,8 @@ export const aliasTools: ToolDefinition[] = [
       search: z.string().optional().describe('Search aliases by name pattern'),
       limit: z.number().int().min(1).max(200).optional().describe('Max results (default: 100)'),
     }),
-    async execute(input) {
+    async execute(input, context?) {
+      await verifySessionTenant(input.sessionId as string, context);
       const conditions = [eq(nodeAliases.sessionId, input.sessionId as string)];
 
       if (input.nodeId) {
