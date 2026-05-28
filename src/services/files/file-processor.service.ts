@@ -6,6 +6,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { FileMetadata, ExtractedContent, NodeType } from '../../types/index.js';
 import { geminiClientService } from '../llm/gemini-client.service.js';
+import { doclingClientService } from './docling-client.service.js';
+import { structureToMint } from './mint-mapper.js';
 import { relationshipInferrerService } from '../knowledge-graph/relationship-inferrer.service.js';
 import { AppError } from '../../middleware/error-handler.js';
 import { getConfig } from '../../config.js';
@@ -89,32 +91,56 @@ export const fileProcessorService = {
         throw new AppError('FILE_NOT_FOUND', 'File not found', 404);
       }
 
-      // Read file content
-      const fileBuffer = await fs.readFile(fileRecord.storagePath);
-      const base64Content = fileBuffer.toString('base64');
+      // Extract content (EXTRACTION ONLY — no reasoning). Docling is the
+      // default; on any failure we fall back to the Gemini extractor so a
+      // missing Python/Docling runtime degrades gracefully.
+      let extractionResult: { success: boolean; extractedContent?: ExtractedContent; error?: string } | undefined;
 
-      // Extract content using Gemini (EXTRACTION ONLY)
-      const extractionResult = await geminiClientService.extractFromFile({
-        fileId,
-        mimeType: fileRecord.mimeType,
-        fileContent: base64Content,
-      });
+      if ((getConfig().extractor ?? 'docling') === 'docling') {
+        const docling = await doclingClientService.extractFromFile({
+          storagePath: fileRecord.storagePath,
+          mimeType: fileRecord.mimeType,
+        });
+        if (docling.success) {
+          extractionResult = docling;
+        } else {
+          console.warn(`Docling extraction failed for ${fileId}, falling back to Gemini: ${docling.error}`);
+        }
+      }
 
-      if (!extractionResult.success) {
+      if (!extractionResult) {
+        const fileBuffer = await fs.readFile(fileRecord.storagePath);
+        const base64Content = fileBuffer.toString('base64');
+        extractionResult = await geminiClientService.extractFromFile({
+          fileId,
+          mimeType: fileRecord.mimeType,
+          fileContent: base64Content,
+        });
+      }
+
+      if (!extractionResult.success || !extractionResult.extractedContent) {
         throw new Error(extractionResult.error || 'Extraction failed');
       }
+
+      const extracted = extractionResult.extractedContent;
+
+      // Serialize the document structure to MINT for token-efficient prompt use.
+      const mintContent = extracted.structure
+        ? structureToMint(extracted.structure, extracted.metadata)
+        : null;
 
       // Update file record with extracted content
       await getDb()
         .update(files)
         .set({
-          extractedContent: extractionResult.extractedContent,
+          extractedContent: extracted,
+          mintContent,
           processingStatus: 'completed',
         })
         .where(eq(files.id, fileId));
 
       // Create knowledge graph nodes from extracted content
-      await this.integrateIntoGraph(fileRecord.sessionId, fileId, extractionResult.extractedContent!);
+      await this.integrateIntoGraph(fileRecord.sessionId, fileId, extracted);
     } catch (error) {
       console.error('File processing error:', error);
 
