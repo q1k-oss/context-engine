@@ -1,6 +1,6 @@
 {
   "name": "@q1k-oss/context-engine",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AI-powered knowledge graph engine that extracts and structures domain knowledge from conversations",
   "type": "module",
   "license": "MIT",
@@ -69,6 +69,10 @@
     "./tools": {
       "types": "./dist/tools/index.d.ts",
       "import": "./dist/tools/index.js"
+    },
+    "./extraction": {
+      "types": "./dist/extraction.d.ts",
+      "import": "./dist/extraction.js"
     }
   },
   "engines": {
