@@ -1,7 +1,6 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
 import { chatRouter } from './routes/chat.routes.js';
-import { filesRouter } from './routes/files.routes.js';
 import { graphRouter } from './routes/graph.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
@@ -30,8 +29,11 @@ export function createApp(options: CreateAppOptions = {}): Express {
   });
 
   // API routes
+  // NOTE: the file-upload route was removed (ADR-037) — document ingestion is
+  // now driven by q1k-controlplane's Temporal worker, which imports this package
+  // as a library (extractFromFile / structureToMint / chunkDocument) rather than
+  // POSTing to an HTTP endpoint. context-engine no longer orchestrates ingestion.
   app.use('/api/chat', chatRouter);
-  app.use('/api/files', filesRouter);
   app.use('/api/graph', graphRouter);
 
   // Error handler

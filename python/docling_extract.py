@@ -21,9 +21,14 @@ Gemini extractor on a non-zero exit, so this script must fail loudly (exit 1 +
 stderr) rather than emit partial JSON.
 
 Run: `uv run python python/docling_extract.py <file>`
+
+Device: the layout model (RT-DETR-v2) requests float64, which Apple-Silicon MPS
+does not support — so we pin the accelerator via `DOCLING_DEVICE` (default `CPU`,
+verified stable on macOS). Set `DOCLING_DEVICE=CUDA`/`MPS`/`AUTO` on a capable host.
 """
 
 import json
+import os
 import sys
 
 
@@ -36,9 +41,27 @@ def _page_of(item) -> "int | None":
 
 
 def extract(path: str) -> dict:
-    from docling.document_converter import DocumentConverter
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import (
+        AcceleratorOptions,
+        PdfPipelineOptions,
+    )
 
-    doc = DocumentConverter().convert(path).document
+    # Pin the accelerator device (lowercase string: auto/cpu/mps/cuda/cuda:N).
+    # Default cpu avoids the Apple-Silicon MPS float64 crash in RT-DETR-v2;
+    # override with DOCLING_DEVICE on a capable host.
+    device = os.getenv("DOCLING_DEVICE", "cpu").lower()
+    pipeline_options = PdfPipelineOptions(
+        accelerator_options=AcceleratorOptions(device=device)
+    )
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+        }
+    )
+
+    doc = converter.convert(path).document
 
     text_content = doc.export_to_markdown()
 

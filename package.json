@@ -25,7 +25,9 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "!dist/__tests__"
+    "!dist/__tests__",
+    "python",
+    "pyproject.toml"
   ],
   "exports": {
     ".": {
@@ -81,7 +83,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

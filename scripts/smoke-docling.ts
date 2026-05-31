@@ -10,6 +10,7 @@
  */
 import { decodeDocument } from '@q1k-oss/mint-format';
 import { structureToMint } from '../src/services/files/mint-mapper.js';
+import { chunkDocument } from '../src/services/files/chunker.js';
 import { doclingClientService } from '../src/services/files/docling-client.service.js';
 import type { DocumentStructure } from '../src/types/index.js';
 
@@ -41,9 +42,16 @@ async function main(): Promise<void> {
   assert(decoded.sections.length >= 2, 'sections lost on decode round-trip');
   console.log(`MINT mapping OK — ${decoded.sections.length} sections round-tripped.\n`);
 
+  // Chunking (pure) — the unit the controlplane embed/persist activities consume.
+  const chunks = chunkDocument(sample);
+  assert(chunks.length >= 3, 'expected sections + table + list chunks');
+  assert(chunks.every((c, i) => c.chunkIndex === i), 'chunkIndex must be 0..n stable');
+  assert(chunks.some((c) => c.sectionRef === 'Overview' && c.pageRef === 1), 'chunk provenance lost');
+  console.log(`Chunking OK — ${chunks.length} chunks; refs: ${chunks.map((c) => c.sectionRef ?? '∅').join(', ')}\n`);
+
   const file = process.argv[2];
   if (file) {
-    console.log(`Running Docling on ${file} ...`);
+    console.log(`Running Docling on ${file} (DOCLING_DEVICE=${process.env.DOCLING_DEVICE ?? 'cpu'}) ...`);
     const r = await doclingClientService.extractFromFile({ storagePath: file, mimeType: 'application/pdf' });
     if (!r.success) {
       console.log(`Docling failed (expected if not installed): ${r.error}`);
@@ -51,7 +59,10 @@ async function main(): Promise<void> {
     }
     const s = r.extractedContent?.structure;
     assert(!!s, 'docling returned no structure');
-    console.log('Docling OK. MINT preview:\n' + structureToMint(s!, r.extractedContent?.metadata).slice(0, 500));
+    const realChunks = chunkDocument(s!);
+    assert(realChunks.length >= 1, 'real doc produced no chunks');
+    console.log('Docling OK. MINT preview:\n' + structureToMint(s!, r.extractedContent?.metadata).slice(0, 300));
+    console.log(`\nReal-doc chunks: ${realChunks.length}. First chunk:\n${realChunks[0]!.text.slice(0, 160)}`);
   }
 }
 

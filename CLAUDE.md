@@ -4,47 +4,55 @@ Guidance for Claude Code when working in the **context-engine** repo.
 
 ## What this is
 
-`@q1k-oss/context-engine` — a TypeScript SDK + HTTP service for the customer-knowledge layer: file ingestion, knowledge-graph extraction, and prioritized-context retrieval for LLM prompts. It is consumed by `q1k-controlplane` as a vendored npm dependency (with a patch). Initialize with `initContextEngine({ databaseUrl, ... })` before using any service.
+`@q1k-oss/context-engine` — a TypeScript **library** (plus an optional standalone HTTP server) for the customer-knowledge layer: document extraction, knowledge-graph building, and prioritized-context retrieval.
+
+**Primary consumption (ADR-037): as a library.** `q1k-controlplane`'s Temporal worker imports this package and calls its pure functions **in-process** inside activities — there is no deployed context-engine HTTP service in the document-ingestion path. context-engine owns the *domain logic* (Docling/Gemini extraction, entity extraction, MINT mapping, chunking); durability/retry/concurrency/persistence live in controlplane's Temporal workflow + tenant Postgres. This mirrors the btree (logic) + Temporal (durability) split.
+
+The Express server (`src/server.ts`, `createApp`) still exists for standalone chat/graph use, but the **file-upload route and async `processFile` orchestration were removed** (ADR-037) — ingestion is controlplane's job now.
+
+## The library surface (what controlplane imports)
+
+Pure, side-effect-free functions exported from `src/index.ts`:
+
+- `doclingClientService.extractFromFile({ storagePath, mimeType })` → `ExtractedContent` (spawns the Python Docling adapter; falls back to Gemini on failure).
+- `structureToMint(structure, metadata)` / `toMintDocument(...)` → token-efficient MINT encoding (`@q1k-oss/mint-format` ≥ 1.1.0).
+- `chunkDocument(structure, opts)` → `DocumentChunk[]` — §-boundary chunks with overlap + `{ text, sectionRef, pageRef, chunkIndex }`. Deterministic (stable `chunkIndex` = idempotency key for the persist activity).
+- `claudeClientService` / `geminiClientService` — LLM clients (extraction only).
+- Types from `src/types/` (`ExtractedContent`, `DocumentStructure`, `DocumentChunk`).
+
+None of these touch the DB or filesystem (beyond Docling reading the file path it's handed). Persistence (`knowledge_chunks`, the `kg_*` tables) is controlplane's.
 
 ## Commands
 
 ```bash
-npm run dev          # tsx watch src/server.ts
 npm run build        # tsc -> dist/
-npm run start        # node dist/server.js
-npm run db:push      # apply schema to the DB (this repo uses push, not migrations)
-npm run db:studio
+npm test             # vitest run
+npm run dev          # tsx watch src/server.ts (standalone server)
+npm run db:push      # apply schema (standalone server only; controlplane owns its own tenant schemas)
 ```
 
-## File extraction (upload → knowledge graph)
+## Document extraction (Docling)
 
-`POST /api/files/upload` → `fileProcessorService.saveFile` (writes to `uploadDir`, default `./uploads`) → async `processFile`:
+`doclingClientService.extractFromFile()` spawns `python/docling_extract.py` (Docling). On any failure it falls back to Gemini, so a missing Python/Docling runtime degrades gracefully.
 
-1. **Extract** via the configured extractor:
-   - `extractor: 'docling'` (default) — `doclingClientService` spawns `python/docling_extract.py` (Docling). On any failure it **falls back to Gemini**, so a missing Python/Docling runtime degrades gracefully.
-   - `extractor: 'gemini'` — `geminiClientService` (extraction only, never reasoning).
-   Both return the same `ExtractedContent` shape (`src/types/file.types.ts`).
-2. **Serialize to MINT** — `structureToMint` (`src/services/files/mint-mapper.ts`) encodes the document `structure` via `@q1k-oss/mint-format`'s `encodeDocument` and stores it in `files.mint_content` for token-efficient prompt injection.
-3. **Integrate into the graph** — `integrateIntoGraph` creates `Artifact` + `Entity` nodes/edges.
+- **Device:** the layout model (RT-DETR-v2) requests float64, unsupported on Apple-Silicon MPS. The script pins the accelerator via **`DOCLING_DEVICE`** (default `cpu`, verified stable on macOS). Set `DOCLING_DEVICE=cuda`/`mps`/`auto` on a capable host.
+- **Python command:** override `uv run python` via **`DOCLING_CMD`** (e.g. `python3`, or `uv run --project <ce-repo> python` when consuming this package from another repo whose cwd lacks the Docling env).
+- **Packaging:** `python/` + `pyproject.toml` ship in the npm package (`files` field) so the script travels with the library. The consuming worker still needs a Python+Docling runtime reachable via `DOCLING_CMD`.
 
-### Docling (Python) setup
-
-Docling is a Python dependency (`pyproject.toml`), not bundled with the JS package. To run the default extractor locally:
-
+Local Docling setup:
 ```bash
-uv sync                                   # installs Docling (first run pulls ML models, ~hundreds of MB)
-npx tsx scripts/smoke-docling.ts          # MINT-mapping smoke (no Docling needed)
-npx tsx scripts/smoke-docling.ts file.pdf # real Docling extraction on a file
+uv sync                                              # installs Docling (first run pulls ML models, ~hundreds of MB)
+npx tsx scripts/smoke-docling.ts                     # MINT + chunk smoke (no Docling needed)
+DOCLING_CMD="uv run python" npx tsx scripts/smoke-docling.ts file.pdf   # real Docling extraction + chunking
 ```
-
-Override the Python command with `DOCLING_CMD` (default `uv run python`). The script must emit valid JSON to stdout or exit non-zero (the TS caller falls back to Gemini on failure).
 
 ## MINT usage
 
-MINT (`@q1k-oss/mint-format`) is used to pack data into LLM prompts token-efficiently: graph nodes/edges (`claude-client.service.ts`, `encode`) and now parsed documents (`encodeDocument`, see the mapper above). Requires `@q1k-oss/mint-format` ≥ 1.1.0 (adds `encodeDocument`/`decodeDocument`).
+MINT (`@q1k-oss/mint-format`) packs data into LLM prompts token-efficiently: graph nodes/edges (`claude-client.service.ts`) and parsed documents (`structureToMint`/`encodeDocument`). Requires `@q1k-oss/mint-format` ≥ 1.1.0.
 
 ## Conventions
 
-- ESM, NodeNext module resolution — **import with `.js` extensions** even from `.ts`.
-- Schema in `src/db/schema/*.ts`; apply with `db:push`.
-- HTTP routes currently use a trusted-caller pattern (no JWT yet) — q1k-auth middleware is a planned hardening item.
+- ESM, NodeNext — **import with `.js` extensions** even from `.ts`.
+- Subpath imports break `require()` of `package.json` — use the declared `exports`.
+- Schema in `src/db/schema/*.ts`. The `files` table is now **dead** (orchestration removed); left in place rather than surgically dropped.
+- Standalone server routes use a trusted-caller pattern; for the library path, auth/tenant-isolation are the consuming worker's concern.
