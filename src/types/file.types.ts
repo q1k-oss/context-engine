@@ -48,6 +48,8 @@ export interface DocumentStructure {
     heading: string;
     content: string;
     level?: number;
+    /** 1-based page the section starts on (Docling provenance), if known. */
+    pageRef?: number;
   }>;
   tables?: Array<{
     caption?: string;
@@ -57,6 +59,11 @@ export interface DocumentStructure {
   lists?: Array<{
     type: 'ordered' | 'unordered';
     items: string[];
+  }>;
+  /** Figures/images extracted from the document (Docling pictures). */
+  figures?: Array<{
+    caption?: string;
+    pageRef?: number;
   }>;
 }
 

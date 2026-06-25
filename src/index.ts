@@ -8,7 +8,6 @@ export type { CreateAppOptions } from './app.js';
 
 // Routes
 export { chatRouter } from './routes/chat.routes.js';
-export { filesRouter } from './routes/files.routes.js';
 export { graphRouter } from './routes/graph.routes.js';
 
 // Middleware
@@ -23,9 +22,15 @@ export {
   knowledgeEdgesRelations, nodeAliasesRelations, filesRelations,
 } from './db/schema/index.js';
 
+// Document ingestion — pure, importable functions (ADR-037: CE is a library;
+// q1k-controlplane's Temporal activities call these directly, no HTTP service).
+export { doclingClientService } from './services/files/docling-client.service.js';
+export { toMintDocument, structureToMint } from './services/files/mint-mapper.js';
+export { chunkDocument } from './services/files/chunker.js';
+export type { DocumentChunk, ChunkOptions } from './services/files/chunker.js';
+
 // Services
 export { chatOrchestratorService } from './services/chat/chat-orchestrator.service.js';
-export { fileProcessorService } from './services/files/file-processor.service.js';
 export { claudeClientService } from './services/llm/claude-client.service.js';
 export { geminiClientService } from './services/llm/gemini-client.service.js';
 export { graphBuilderService } from './services/knowledge-graph/graph-builder.service.js';

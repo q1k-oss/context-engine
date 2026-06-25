@@ -1,6 +1,6 @@
 {
   "name": "@q1k-oss/context-engine",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AI-powered knowledge graph engine that extracts and structures domain knowledge from conversations",
   "type": "module",
   "license": "MIT",
@@ -25,7 +25,9 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "!dist/__tests__"
+    "!dist/__tests__",
+    "python",
+    "pyproject.toml"
   ],
   "exports": {
     ".": {
@@ -67,6 +69,10 @@
     "./tools": {
       "types": "./dist/tools/index.d.ts",
       "import": "./dist/tools/index.js"
+    },
+    "./extraction": {
+      "types": "./dist/extraction.d.ts",
+      "import": "./dist/extraction.js"
     }
   },
   "engines": {
@@ -81,12 +87,14 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.21.0",
-    "@q1k-oss/mint-format": "^1.0.2",
+    "@q1k-oss/mint-format": "^1.1.0",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.38.3",
     "express": "^4.21.2",

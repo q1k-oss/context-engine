@@ -10,6 +10,8 @@ export const files = pgTable('files', {
   fileSize: integer('file_size').notNull(),
   storagePath: text('storage_path').notNull(),
   extractedContent: jsonb('extracted_content'),
+  // MINT-serialized document (encodeDocument output) for token-efficient prompt injection.
+  mintContent: text('mint_content'),
   processingStatus: varchar('processing_status', { length: 20 }).default('pending').notNull(),
   processingError: text('processing_error'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

@@ -19,6 +19,8 @@ export interface ContextEngineConfig {
   claudeModel?: string;
   /** Gemini model for file extraction (default: 'gemini-2.0-flash-exp') */
   geminiModel?: string;
+  /** File extractor: 'docling' (Python subprocess, default) or 'gemini'. */
+  extractor?: 'docling' | 'gemini';
   /** PostgreSQL connection pool size (default: 10) */
   dbPoolSize?: number;
   /** PostgreSQL connection idle timeout in seconds (default: 30) */
