@@ -45,7 +45,11 @@ part of the graph that matters for the question at hand, serialised compactly wi
 [`@q1k-oss/mint-format`](https://github.com/q1k-oss/mint). With Apache AGE enabled you can
 also run Cypher over it: shortest paths, all paths, neighbours.
 
-It runs either as an embeddable SDK or as a standalone Express server.
+It is designed to be used **as a library first**: a Temporal worker imports it and calls
+its pure, side-effect-free functions in-process inside activities, keeping durability,
+retry, concurrency and persistence with the host. A standalone Express server is still
+provided for chat and graph use, but document ingestion is the host's job — the upload
+route and its async orchestration were removed in ADR-037.
 
 ## Highlights
 
@@ -58,8 +62,10 @@ It runs either as an embeddable SDK or as a standalone Express server.
   finding and neighbour queries.
 - **Pre-built LLM tools** — 18 tool definitions with Zod schemas, ready to register with
   any tool-use loop.
-- **SDK or server** — import the services directly, or run the Express app with SSE
-  streaming.
+- **Pure extraction entrypoint** — `@q1k-oss/context-engine/extraction` exposes Docling
+  extraction, MINT mapping and deterministic chunking with no DB or filesystem coupling.
+- **Library or server** — import the services directly, or run the Express app with SSE
+  streaming for chat and graph.
 
 ## Install
 
@@ -191,6 +197,7 @@ the Cypher endpoints.
 | `@q1k-oss/context-engine/config` | Configuration helpers |
 | `@q1k-oss/context-engine/db` | `getDb` and the Drizzle client |
 | `@q1k-oss/context-engine/db/schema` | Tables: `sessions`, `knowledgeNodes`, … |
+| `@q1k-oss/context-engine/extraction` | `doclingClientService`, `structureToMint`, `toMintDocument`, `chunkDocument` |
 | `@q1k-oss/context-engine/tools` | `nodeTools`, `edgeTools`, `graphTools`, `aliasTools` |
 | `@q1k-oss/context-engine/types` | `Session`, `KnowledgeNode` and friends |
 
@@ -216,15 +223,6 @@ Available once you mount `createApp()`.
 | `GET` | `/api/chat/sessions/:id` | Get session with messages |
 | `DELETE` | `/api/chat/sessions/:id` | Delete session |
 | `POST` | `/api/chat/sessions/:id/messages` | Send message (SSE stream) |
-
-**Files**
-
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `POST` | `/api/files/upload` | Upload a file (PDF, images, text, docx; 50 MB limit) |
-| `GET` | `/api/files/:id` | Get file metadata |
-| `GET` | `/api/files/:id/content` | Get extracted content |
-| `DELETE` | `/api/files/:id` | Delete file |
 
 **Knowledge graph**
 
