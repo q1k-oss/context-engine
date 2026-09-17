@@ -1,6 +1,71 @@
-# @q1k-oss/context-engine
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/logo-dark.svg">
+    <img src=".github/logo.svg" alt="context-engine" width="88">
+  </picture>
+</p>
 
-AI-powered knowledge graph engine that extracts and structures domain knowledge from conversations. Uses Claude as the primary reasoning engine and Gemini for file extraction.
+<h1 align="center">@q1k-oss/context-engine</h1>
+
+<p align="center"><strong>Conversations become a graph</strong></p>
+
+<p align="center">
+  Turns conversations and files into a versioned knowledge graph.<br>
+  Postgres for storage, with Apache AGE for path queries.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@q1k-oss/context-engine"><img src="https://img.shields.io/npm/v/@q1k-oss/context-engine.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@q1k-oss/context-engine"><img src="https://img.shields.io/npm/dm/@q1k-oss/context-engine.svg" alt="npm downloads"></a>
+  <a href="https://github.com/q1k-oss/context-engine/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <a href="#api-reference"><strong>Docs</strong></a> ·
+  <a href="https://www.npmjs.com/package/@q1k-oss/context-engine"><strong>npm</strong></a> ·
+  <a href="https://github.com/q1k-oss/context-engine"><strong>GitHub</strong></a> ·
+  <a href="https://q1k.ai/oss"><strong>q1k-oss</strong></a>
+</p>
+
+---
+
+## Overview
+
+Most agents keep their context in a transcript. That works until the transcript is longer
+than the window, and then you are summarising, and the details that mattered are the ones
+that get summarised away.
+
+Context Engine keeps the context as a graph instead. As a conversation runs, it extracts
+entities, processes and business rules and writes them as nodes and edges. Upload a PDF or
+a spreadsheet and the same thing happens to its contents. Every change is versioned, so you
+can ask what the model believed at turn nine, and diff it against turn fourteen.
+
+Reading back out, you ask for prioritised context rather than the last _n_ messages — the
+part of the graph that matters for the question at hand, serialised compactly with
+[`@q1k-oss/mint-format`](https://github.com/q1k-oss/mint). With Apache AGE enabled you can
+also run Cypher over it: shortest paths, all paths, neighbours.
+
+It is designed to be used **as a library first**: a Temporal worker imports it and calls
+its pure, side-effect-free functions in-process inside activities, keeping durability,
+retry, concurrency and persistence with the host. A standalone Express server is still
+provided for chat and graph use, but document ingestion is the host's job — the upload
+route and its async orchestration were removed in ADR-037.
+
+## Highlights
+
+- **Versioned knowledge graph** — every mutation is a version, with deltas you can replay.
+- **Extraction from conversation and files** — entities, processes and rules, plus PDFs,
+  images and documents.
+- **Prioritised context retrieval** — fetch the relevant subgraph by priority, not by
+  recency.
+- **Cypher over Postgres** — optional [Apache AGE](https://age.apache.org/) for path
+  finding and neighbour queries.
+- **Pre-built LLM tools** — 18 tool definitions with Zod schemas, ready to register with
+  any tool-use loop.
+- **Pure extraction entrypoint** — `@q1k-oss/context-engine/extraction` exposes Docling
+  extraction, MINT mapping and deterministic chunking with no DB or filesystem coupling.
+- **Library or server** — import the services directly, or run the Express app with SSE
+  streaming for chat and graph.
 
 ## Install
 
@@ -8,39 +73,49 @@ AI-powered knowledge graph engine that extracts and structures domain knowledge 
 npm install @q1k-oss/context-engine
 ```
 
-## Quick Start
+Requires Node.js 18+ and a PostgreSQL database. Apache AGE is optional but enabled by
+default.
+
+## Quick start
 
 ```ts
 import { initContextEngine, createApp } from '@q1k-oss/context-engine';
 
-// Initialize with your config
 initContextEngine({
   databaseUrl: process.env.DATABASE_URL!,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   googleAiApiKey: process.env.GOOGLE_AI_API_KEY,
 });
 
-// Create and start the Express server
 const app = createApp({ corsOrigin: 'http://localhost:3000' });
 app.listen(3001, () => console.log('Context Engine running on :3001'));
 ```
 
-## Configuration
+Push the schema before the first run:
+
+```bash
+npx drizzle-kit push
+```
+
+## Usage
+
+### Configuration
+
+`initContextEngine` takes the whole configuration:
 
 | Option | Required | Default | Description |
-|--------|----------|---------|-------------|
+| --- | --- | --- | --- |
 | `databaseUrl` | Yes | — | PostgreSQL connection string |
-| `anthropicApiKey` | No | — | Anthropic API key for Claude (primary reasoning engine) |
-| `googleAiApiKey` | No | — | Google AI API key for Gemini (file extraction only) |
+| `anthropicApiKey` | No | — | Anthropic API key for Claude, the reasoning engine |
+| `googleAiApiKey` | No | — | Google AI API key for Gemini, used for file extraction |
 | `ageEnabled` | No | `true` | Enable Apache AGE graph extensions for Cypher queries |
 | `uploadDir` | No | `'./uploads'` | Directory for file uploads |
 
-### Environment Variables (Standalone Server)
-
-When running the built-in standalone server (`node dist/server.js`), configuration is read from environment variables:
+Running the built-in standalone server (`node dist/server.js`) reads the same settings from
+the environment instead:
 
 | Variable | Description |
-|----------|-------------|
+| --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude |
 | `GOOGLE_AI_API_KEY` | Google AI API key for Gemini |
@@ -49,9 +124,9 @@ When running the built-in standalone server (`node dist/server.js`), configurati
 | `CORS_ORIGIN` | CORS origin (default: `'http://localhost:3000'`) |
 | `API_PORT` | Server port (default: `3001`) |
 
-## Using Individual Services
+### Using the services directly
 
-You can use services directly without spinning up the full Express server:
+You do not need the Express layer. Import the services and drive them yourself:
 
 ```ts
 import {
@@ -61,143 +136,178 @@ import {
   entityExtractorService,
 } from '@q1k-oss/context-engine';
 
-initContextEngine({ databaseUrl: '...' });
+initContextEngine({ databaseUrl: process.env.DATABASE_URL! });
 
-// Create a chat session
 const session = await chatOrchestratorService.createSession('My Agent');
 
-// Stream a message
 for await (const event of chatOrchestratorService.processMessage(session.id, 'Build me a support agent')) {
   if (event.type === 'text_delta') process.stdout.write(event.data.delta);
 }
 
-// Get the knowledge graph
 const graph = await graphBuilderService.getGraph(session.id);
 ```
 
-## LLM Tool Definitions
+### Registering the graph as LLM tools
 
-The SDK exports pre-built tool definitions that can be registered directly with any LLM tool-use system (Claude, OpenAI, etc.):
+The package ships tool definitions that plug into any tool-use system — Claude, OpenAI, or
+your own loop. Each carries a Zod schema for validation and an `execute` function.
 
 ```ts
 import { initContextEngine, contextEngineTools } from '@q1k-oss/context-engine';
-import type { ToolDefinition } from '@q1k-oss/context-engine';
 
-initContextEngine({ databaseUrl: '...' });
+initContextEngine({ databaseUrl: process.env.DATABASE_URL! });
 
-// Register all tools at once
 for (const tool of contextEngineTools) {
-  console.log(tool.name, tool.description);
-  // tool.parameters — Zod schema for input validation
-  // tool.execute(input) — Run the tool with validated input
+  register({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters, // Zod schema
+    run: tool.execute,
+  });
 }
 ```
 
-You can also import tool groups individually:
+Import the groups individually if you want a narrower surface:
 
 ```ts
 import { nodeTools, edgeTools, graphTools, aliasTools } from '@q1k-oss/context-engine/tools';
 ```
 
-### Available Tools
+### Database setup
 
-**Node Tools** — `create_node`, `get_node`, `update_node`, `delete_node`, `list_nodes`, `search_nodes`
+PostgreSQL is required. Set `DATABASE_URL`, then push the Drizzle schema:
 
-**Edge Tools** — `create_edge`, `get_edge`, `delete_edge`, `list_edges`
-
-**Graph Tools** — `get_graph`, `get_prioritized_context`, `get_graph_version`, `list_graph_versions`, `get_context_deltas`, `repair_orphans`
-
-**Alias Tools** — `add_alias`, `list_aliases`
-
-## Subpath Imports
-
-Import only what you need:
-
-```ts
-import { createApp } from '@q1k-oss/context-engine/app';
-import { getDb } from '@q1k-oss/context-engine/db';
-import { sessions, knowledgeNodes } from '@q1k-oss/context-engine/db/schema';
-import { contextEngineTools } from '@q1k-oss/context-engine/tools';
-import type { Session, KnowledgeNode } from '@q1k-oss/context-engine/types';
+```bash
+npx drizzle-kit push
 ```
 
-## API Endpoints
+`docker-compose.yml` in this repository brings up a plain PostgreSQL 16 for local work.
+For Cypher queries you also need the [Apache AGE](https://age.apache.org/) extension on
+that instance — either swap the image for `apache/age`, or set `ageEnabled: false` and skip
+the Cypher endpoints.
 
-When using `createApp()`, these routes are available:
+## API reference
 
-### Chat
+### Subpath imports
+
+| Import | Contents |
+| --- | --- |
+| `@q1k-oss/context-engine` | Services, `initContextEngine`, `contextEngineTools` |
+| `@q1k-oss/context-engine/app` | `createApp` — the Express application |
+| `@q1k-oss/context-engine/config` | Configuration helpers |
+| `@q1k-oss/context-engine/db` | `getDb` and the Drizzle client |
+| `@q1k-oss/context-engine/db/schema` | Tables: `sessions`, `knowledgeNodes`, … |
+| `@q1k-oss/context-engine/extraction` | `doclingClientService`, `structureToMint`, `toMintDocument`, `chunkDocument` |
+| `@q1k-oss/context-engine/tools` | `nodeTools`, `edgeTools`, `graphTools`, `aliasTools` |
+| `@q1k-oss/context-engine/types` | `Session`, `KnowledgeNode` and friends |
+
+### LLM tools
+
+| Group | Tools |
+| --- | --- |
+| **Node** | `create_node`, `get_node`, `update_node`, `delete_node`, `list_nodes`, `search_nodes` |
+| **Edge** | `create_edge`, `get_edge`, `delete_edge`, `list_edges` |
+| **Graph** | `get_graph`, `get_prioritized_context`, `get_graph_version`, `list_graph_versions`, `get_context_deltas`, `repair_orphans` |
+| **Alias** | `add_alias`, `list_aliases` |
+
+### HTTP endpoints
+
+Available once you mount `createApp()`.
+
+**Chat**
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
+| --- | --- | --- |
 | `POST` | `/api/chat/sessions` | Create a session |
 | `GET` | `/api/chat/sessions` | List sessions |
 | `GET` | `/api/chat/sessions/:id` | Get session with messages |
 | `DELETE` | `/api/chat/sessions/:id` | Delete session |
 | `POST` | `/api/chat/sessions/:id/messages` | Send message (SSE stream) |
 
-### Files
+**Knowledge graph**
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/files/upload` | Upload a file (PDF, images, text, docx; 50MB limit) |
-| `GET` | `/api/files/:id` | Get file metadata |
-| `GET` | `/api/files/:id/content` | Get extracted content |
-| `DELETE` | `/api/files/:id` | Delete file |
-
-### Knowledge Graph
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
+| --- | --- | --- |
 | `GET` | `/api/graph/:sessionId` | Get full knowledge graph |
 | `GET` | `/api/graph/:sessionId/versions` | List graph versions |
-| `GET` | `/api/graph/:sessionId/versions/:version` | Get specific graph version |
-| `GET` | `/api/graph/:sessionId/deltas` | Get context evolution timeline |
-| `GET` | `/api/graph/:sessionId/deltas/:deltaId` | Get specific delta |
-| `GET` | `/api/graph/:sessionId/context` | Get prioritized context (`?minPriority=0.3`) |
+| `GET` | `/api/graph/:sessionId/versions/:version` | Get a specific graph version |
+| `GET` | `/api/graph/:sessionId/deltas` | Get the context evolution timeline |
+| `GET` | `/api/graph/:sessionId/deltas/:deltaId` | Get a specific delta |
+| `GET` | `/api/graph/:sessionId/context` | Get prioritised context (`?minPriority=0.3`) |
 | `POST` | `/api/graph/:sessionId/repair-orphans` | Repair orphan nodes via LLM semantic matching |
 
-### Apache AGE / Cypher Queries
-
-Requires `ageEnabled: true` (default).
+**Apache AGE / Cypher** — requires `ageEnabled: true` (the default).
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/graph/:sessionId/age` | Get graph from Apache AGE |
-| `GET` | `/api/graph/:sessionId/path` | Find shortest path (`?from=&to=`) |
+| --- | --- | --- |
+| `GET` | `/api/graph/:sessionId/age` | Get the graph from Apache AGE |
+| `GET` | `/api/graph/:sessionId/path` | Find the shortest path (`?from=&to=`) |
 | `GET` | `/api/graph/:sessionId/paths` | Find all paths (`?from=&to=&maxHops=5`) |
-| `GET` | `/api/graph/:sessionId/neighbors/:nodeId` | Get node neighbors (`?direction=both`) |
+| `GET` | `/api/graph/:sessionId/neighbors/:nodeId` | Get node neighbours (`?direction=both`) |
 | `POST` | `/api/graph/:sessionId/cypher` | Execute a read-only Cypher query |
 
-### Domain Extraction
+**Domain extraction**
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/graph/domain/extract` | Extract complete domain graph from documentation |
+| --- | --- | --- |
+| `POST` | `/api/graph/domain/extract` | Extract a complete domain graph from documentation |
 | `POST` | `/api/graph/domain/entities` | Extract entities from documentation |
-| `POST` | `/api/graph/domain/processes` | Extract processes/workflows |
+| `POST` | `/api/graph/domain/processes` | Extract processes and workflows |
 | `POST` | `/api/graph/domain/rules` | Extract business rules |
 
-## Database Setup
+## Development
 
-Requires PostgreSQL. Push the schema:
+Architecture in one table:
+
+| Piece | Role |
+| --- | --- |
+| **Claude** | Primary reasoning engine; receives conversation history plus graph context |
+| **Gemini** | File extraction only — PDFs, images, documents |
+| **mint-format** | Token-efficient serialisation of graph context into prompts |
+| **Drizzle ORM** | PostgreSQL schema and queries |
+| **Apache AGE** | Optional Cypher graph queries |
+| **Express** | HTTP API with SSE streaming |
+| **Zod** | Request validation and tool parameter schemas |
 
 ```bash
-# Set DATABASE_URL in .env
-npx drizzle-kit push
+npm install
+
+npm run dev          # tsx watch src/server.ts
+npm run build        # tsc into dist/
+npm run start        # node dist/server.js
+
+npm run db:generate  # generate a migration from the schema
+npm run db:migrate   # apply migrations
+npm run db:push      # push the schema straight to the database
+npm run db:studio    # open Drizzle Studio
 ```
 
-For Apache AGE graph queries, install the [Apache AGE](https://age.apache.org/) extension on your PostgreSQL instance.
+`docker-compose.yml` brings up PostgreSQL with Apache AGE for local work. Python helpers
+used by the file-extraction path live in `python/`, configured through `pyproject.toml`.
 
-## Architecture
+## Contributing
 
-- **Claude** — Primary reasoning engine, receives full conversation history + knowledge graph context
-- **Gemini** — File extraction only (PDFs, images, documents)
-- **mint-format** — Token-efficient formatting for LLM prompts via `@q1k-oss/mint-format`
-- **Drizzle ORM** — PostgreSQL schema and queries
-- **Apache AGE** — Optional Cypher graph queries (path finding, neighbors, custom queries)
-- **Express** — HTTP API with SSE streaming
-- **Zod** — Request validation and tool parameter schemas
+Contributions are welcome.
+
+1. Fork the repository and clone your fork.
+2. Create a branch: `git checkout -b feat/my-change`.
+3. `npm install`, then `npm run build` to confirm the project still compiles.
+4. Update this README for anything that changes the public surface.
+5. Commit using [Conventional Commits](https://www.conventionalcommits.org/) and open a
+   pull request.
+
+## Related projects
+
+Context Engine is part of the q1k-oss family — see
+[q1k.ai/oss](https://q1k.ai/oss).
+
+| Package | What it does |
+| --- | --- |
+| [`@q1k-oss/mint-format`](https://github.com/q1k-oss/mint) | Token-efficient data format for LLM prompts |
+| [`@q1k-oss/context-engine`](https://github.com/q1k-oss/context-engine) | Turns conversations and files into a versioned knowledge graph |
+| [`@q1k-oss/behaviour-tree-workflows`](https://github.com/q1k-oss/behaviour-tree-workflows) | Declarative behaviour trees in YAML, durable via Temporal |
+| [`@q1k-oss/kiban`](https://github.com/q1k-oss/kiban) | React components on Radix primitives and Tailwind |
 
 ## License
 
-MIT
+[MIT](LICENSE)
