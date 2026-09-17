@@ -2,6 +2,14 @@
   "name": "@q1k-oss/context-engine",
   "version": "0.3.0",
   "description": "AI-powered knowledge graph engine that extracts and structures domain knowledge from conversations",
+  "homepage": "https://github.com/q1k-oss/context-engine#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/q1k-oss/context-engine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/q1k-oss/context-engine/issues"
+  },
   "type": "module",
   "license": "MIT",
   "keywords": [

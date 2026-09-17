@@ -6,11 +6,11 @@ Guidance for Claude Code when working in the **context-engine** repo.
 
 `@q1k-oss/context-engine` — a TypeScript **library** (plus an optional standalone HTTP server) for the customer-knowledge layer: document extraction, knowledge-graph building, and prioritized-context retrieval.
 
-**Primary consumption (ADR-037): as a library.** `q1k-controlplane`'s Temporal worker imports this package and calls its pure functions **in-process** inside activities — there is no deployed context-engine HTTP service in the document-ingestion path. context-engine owns the *domain logic* (Docling/Gemini extraction, entity extraction, MINT mapping, chunking); durability/retry/concurrency/persistence live in controlplane's Temporal workflow + tenant Postgres. This mirrors the btree (logic) + Temporal (durability) split.
+**Primary consumption (ADR-037): as a library.** The intended host is a Temporal worker that imports this package and calls its pure functions **in-process** inside activities — there is no deployed context-engine HTTP service in the document-ingestion path. context-engine owns the *domain logic* (Docling/Gemini extraction, entity extraction, MINT mapping, chunking); durability, retry, concurrency and persistence belong to the host's Temporal workflow and its own database. This mirrors the behaviour-tree (logic) + Temporal (durability) split.
 
-The Express server (`src/server.ts`, `createApp`) still exists for standalone chat/graph use, but the **file-upload route and async `processFile` orchestration were removed** (ADR-037) — ingestion is controlplane's job now.
+The Express server (`src/server.ts`, `createApp`) still exists for standalone chat/graph use, but the **file-upload route and async `processFile` orchestration were removed** (ADR-037) — ingestion belongs to the host now.
 
-## The library surface (what controlplane imports)
+## The library surface (what a host imports)
 
 Pure, side-effect-free functions exported from `src/index.ts`:
 
@@ -20,7 +20,7 @@ Pure, side-effect-free functions exported from `src/index.ts`:
 - `claudeClientService` / `geminiClientService` — LLM clients (extraction only).
 - Types from `src/types/` (`ExtractedContent`, `DocumentStructure`, `DocumentChunk`).
 
-None of these touch the DB or filesystem (beyond Docling reading the file path it's handed). Persistence (`knowledge_chunks`, the `kg_*` tables) is controlplane's.
+None of these touch the DB or filesystem (beyond Docling reading the file path it's handed). Persistence (`knowledge_chunks`, the `kg_*` tables) belongs to the host.
 
 ## Commands
 
@@ -28,7 +28,7 @@ None of these touch the DB or filesystem (beyond Docling reading the file path i
 npm run build        # tsc -> dist/
 npm test             # vitest run
 npm run dev          # tsx watch src/server.ts (standalone server)
-npm run db:push      # apply schema (standalone server only; controlplane owns its own tenant schemas)
+npm run db:push      # apply schema (standalone server only; a host owns its own schemas)
 ```
 
 ## Document extraction (Docling)
