@@ -24,7 +24,7 @@
   <a href="#api-reference"><strong>Docs</strong></a> ·
   <a href="https://www.npmjs.com/package/@q1k-oss/context-engine"><strong>npm</strong></a> ·
   <a href="https://github.com/q1k-oss/context-engine"><strong>GitHub</strong></a> ·
-  <a href="https://q1k.ai/open-source"><strong>q1k-oss</strong></a>
+  <a href="https://q1k.ai/oss"><strong>q1k-oss</strong></a>
 </p>
 
 ---
@@ -301,7 +301,7 @@ Contributions are welcome.
 ## Related projects
 
 Context Engine is part of the q1k-oss family — see
-[q1k.ai/open-source](https://q1k.ai/open-source).
+[q1k.ai/oss](https://q1k.ai/oss).
 
 | Package | What it does |
 | --- | --- |
