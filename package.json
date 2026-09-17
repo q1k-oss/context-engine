@@ -1,6 +1,6 @@
 {
   "name": "@q1k-oss/context-engine",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "AI-powered knowledge graph engine that extracts and structures domain knowledge from conversations",
   "homepage": "https://github.com/q1k-oss/context-engine#readme",
   "repository": {

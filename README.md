@@ -42,7 +42,7 @@ can ask what the model believed at turn nine, and diff it against turn fourteen.
 
 Reading back out, you ask for prioritised context rather than the last _n_ messages — the
 part of the graph that matters for the question at hand, serialised compactly with
-[`@q1k-oss/mint-format`](https://github.com/q1k-oss/mint). With Apache AGE enabled you can
+[`@q1k-oss/mint-format`](https://github.com/q1k-oss/mint-format). With Apache AGE enabled you can
 also run Cypher over it: shortest paths, all paths, neighbours.
 
 It is designed to be used **as a library first**: a Temporal worker imports it and calls
@@ -303,7 +303,7 @@ Context Engine is part of the q1k-oss family — see
 
 | Package | What it does |
 | --- | --- |
-| [`@q1k-oss/mint-format`](https://github.com/q1k-oss/mint) | Token-efficient data format for LLM prompts |
+| [`@q1k-oss/mint-format`](https://github.com/q1k-oss/mint-format) | Token-efficient data format for LLM prompts |
 | [`@q1k-oss/context-engine`](https://github.com/q1k-oss/context-engine) | Turns conversations and files into a versioned knowledge graph |
 | [`@q1k-oss/behaviour-tree-workflows`](https://github.com/q1k-oss/behaviour-tree-workflows) | Declarative behaviour trees in YAML, durable via Temporal |
 | [`@q1k-oss/kiban`](https://github.com/q1k-oss/kiban) | React components on Radix primitives and Tailwind |
